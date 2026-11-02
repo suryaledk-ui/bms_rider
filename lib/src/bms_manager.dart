@@ -9,6 +9,7 @@ import 'protocol.dart';
 import 'protocol_daly.dart';
 import 'protocol_jbd.dart';
 import 'protocol_jk.dart';
+import 'scan_log.dart';
 
 enum BmsState { idle, scanning, connecting, connected, error }
 
@@ -37,6 +38,10 @@ class BmsManager extends ChangeNotifier {
 
   final StreamController<Telemetry> _telemetry = StreamController.broadcast();
   Stream<Telemetry> get telemetry => _telemetry.stream;
+
+  ScanLogger? _log;
+  void attachLogger(ScanLogger log) => _log = log;
+  void _lg(String tag, String msg) => _log?.log(tag, msg);
 
   void attachStorage({required String Function() getSavedId, required void Function(String) setSavedId}) {
     _getSavedId = getSavedId;
@@ -78,6 +83,7 @@ class BmsManager extends ChangeNotifier {
     final saved = _getSavedId?.call();
     if (saved != null && saved.isNotEmpty) {
       status = 'Auto-connecting to saved scooter…';
+      _lg('BOOT', 'auto-connect saved device $saved');
       _intentionalStop = false;
       connectedId = saved;
       await _connectFlow(BluetoothDevice.fromId(saved), firstTry: false);
@@ -91,6 +97,7 @@ class BmsManager extends ChangeNotifier {
     state = BmsState.scanning;
     candidates = [];
     status = 'Scanning for nearby BLE devices…';
+    _lg('SCAN', 'scan started (all devices, no filters)');
     notifyListeners();
 
     final results = <String, ScanCandidate>{};
@@ -119,6 +126,12 @@ class BmsManager extends ChangeNotifier {
           rssi: r.rssi,
           bonded: false,
         );
+        _lg(
+          'SCAN',
+          'seen $id name="${name.isEmpty ? '(none)' : name}" '
+          'svcs=${r.advertisementData.serviceUuids.map((g) => g.toString()).join(',')} '
+          'rssi=${r.rssi} family=${guess == null ? 'unknown' : familyHint(guess)}',
+        );
       }
       final list = results.values.toList();
       list.sort((a, b) {
@@ -138,12 +151,18 @@ class BmsManager extends ChangeNotifier {
       );
     } catch (e) {
       status = 'Scan error: $e';
+      _lg('SCAN', 'scan error: $e');
     } finally {
       await sub.cancel();
       await FlutterBluePlus.stopScan();
       if (state == BmsState.scanning) {
         state = BmsState.idle;
-        if (candidates.isEmpty) status = 'No BLE devices found — turn scooter on and retry';
+        if (candidates.isEmpty) {
+          status = 'No BLE devices found — turn scooter on and retry';
+          _lg('SCAN', 'finished: 0 devices seen');
+        } else {
+          _lg('SCAN', 'finished: ${candidates.length} devices seen');
+        }
       }
       notifyListeners();
     }
@@ -154,6 +173,7 @@ class BmsManager extends ChangeNotifier {
     connectedId = c.id;
     connectedName = c.name;
     _setSavedId?.call(c.id);
+    _lg('CONN', 'user selected ${c.id} name="${c.name}" guess=${c.guess} rssi=${c.rssi}');
     await _connectFlow(BluetoothDevice.fromId(c.id), firstTry: true);
   }
 
@@ -162,11 +182,13 @@ class BmsManager extends ChangeNotifier {
     _connecting = true;
     state = BmsState.connecting;
     status = 'Connecting to ${connectedName ?? device.platformName}…';
+    _lg('CONN', 'attempt to ${device.remoteId.str} name="${connectedName ?? device.platformName}" firstTry=$firstTry');
     notifyListeners();
     _device = device;
 
     _stateSub ??= device.connectionState.listen((s) {
       if (s == BluetoothConnectionState.disconnected) {
+        _lg('CONN', 'disconnected from ${device.remoteId.str} (intentional=$_intentionalStop)');
         latest = null;
         proto?.dispose();
         proto = null;
@@ -210,6 +232,7 @@ class BmsManager extends ChangeNotifier {
         _connecting = false;
         state = BmsState.error;
         status = firstTry ? 'Could not find scooter (power it on)' : 'Connection failed: $e';
+        _lg('CONN', 'connect failed firstTry=$firstTry err=$e');
         notifyListeners();
         return;
       }
@@ -217,6 +240,7 @@ class BmsManager extends ChangeNotifier {
 
     _connecting = false;
     _retry = 0;
+    _lg('CONN', 'GATT connected to ${device.remoteId.str}');
     if (ok) await _postConnect(device);
   }
 
@@ -255,6 +279,7 @@ class BmsManager extends ChangeNotifier {
         );
     if (svc == null) {
       status = 'No BMS GATT service found';
+      _lg('CONN', 'no BMS GATT service found on ${device.remoteId.str}');
       state = BmsState.error;
       notifyListeners();
       await device.disconnect();
@@ -269,6 +294,7 @@ class BmsManager extends ChangeNotifier {
     }
     if (rx == null || tx == null) {
       status = 'BMS service missing RX/TX characteristics';
+      _lg('CONN', 'missing RX/TX characteristics on ${device.remoteId.str}');
       state = BmsState.error;
       notifyListeners();
       await device.disconnect();
@@ -277,9 +303,11 @@ class BmsManager extends ChangeNotifier {
     final BluetoothCharacteristic writeChar = tx;
 
     final family = _detectFamily(services, device.platformName);
+    _lg('CONN', 'protocol family detected: $family for ${device.remoteId.str}');
     proto = _buildProtocol(family);
     if (proto == null) {
       status = 'Unsupported BMS family ($family)';
+      _lg('CONN', 'unsupported family $family');
       state = BmsState.error;
       notifyListeners();
       await device.disconnect();
@@ -302,6 +330,7 @@ class BmsManager extends ChangeNotifier {
     final ok = await proto!.init();
     if (!ok) {
       status = '${proto!.name} protocol not fully supported yet';
+      _lg('CONN', '${proto!.name} init returned false');
       state = BmsState.error;
       notifyListeners();
       await device.disconnect();
@@ -310,6 +339,7 @@ class BmsManager extends ChangeNotifier {
 
     state = BmsState.connected;
     status = 'Connected · ${proto!.name}';
+    _lg('CONN', 'connected OK: ${proto!.name} on ${device.remoteId.str}');
     notifyListeners();
 
     _pollTimer?.cancel();

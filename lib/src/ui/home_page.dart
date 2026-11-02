@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import '../bms_manager.dart';
 import '../controller.dart';
 import '../range.dart';
+import 'log_page.dart';
 import 'ride_page.dart';
 import 'widgets.dart';
 
@@ -26,6 +27,13 @@ class _HomePageState extends State<HomePage> {
       appBar: AppBar(
         title: const Text('BMS Rider'),
         actions: [
+          IconButton(
+            icon: const Icon(Icons.terminal),
+            tooltip: 'Scan logs',
+            onPressed: () => Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => const LogPage()),
+            ),
+          ),
           IconButton(
             icon: const Icon(Icons.refresh),
             onPressed: () => app.requestPermissionsAndScan(),

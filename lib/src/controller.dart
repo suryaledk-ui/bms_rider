@@ -9,6 +9,7 @@ import 'bms_manager.dart';
 import 'models.dart';
 import 'native_permissions.dart';
 import 'range.dart';
+import 'scan_log.dart';
 import 'store.dart';
 
 class ActiveRide {
@@ -40,6 +41,7 @@ class ActiveRide {
 class AppController extends ChangeNotifier {
   final BmsManager bms = BmsManager();
   final AppStore store = AppStore();
+  final ScanLogger scanLog = ScanLogger();
   late RangeEngine range;
 
   ActiveRide? ride;
@@ -59,6 +61,8 @@ class AppController extends ChangeNotifier {
 
   Future<void> init() async {
     await store.init();
+    await scanLog.init();
+    bms.attachLogger(scanLog);
     final mass = store.scooterWeightKg + store.riderWeightKg;
     range = RangeEngine(
       estimator: RangeEstimator(massKg: mass),
