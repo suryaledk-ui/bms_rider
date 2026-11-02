@@ -10,3 +10,12 @@ workflows:
         script: |
           flutter pub get
           flutter build apk --release
+      - name: Publish APK to GitHub Releases
+        script: |
+          set -e
+          export GH_TOKEN="${GITHUB_TOKEN:?GITHUB_TOKEN not provided}"
+          gh release delete latest-apk --yes --repo suryaledk-ui/bms_rider || true
+          gh release create latest-apk build/app/outputs/flutter-apk/app-release.apk \
+            --repo suryaledk-ui/bms_rider \
+            --title "Latest APK" \
+            --notes "Built by flutter-cloud-build"
