@@ -1,0 +1,9 @@
+{
+  "repoUrl": "https://github.com/suryaledk-ui/bms_rider.git",
+  "branch": "main",
+  "appId": "6ae8a92f586469e372919e66",
+  "workflowId": "android-release",
+  "maxAttempts": 3,
+  "pollIntervalSeconds": 20,
+  "distDir": "dist"
+}
