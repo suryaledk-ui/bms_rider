@@ -10,6 +10,3 @@ workflows:
         script: |
           flutter pub get
           flutter build apk --release
-    publishing:
-      artifacts:
-        - build/app/outputs/flutter-apk/*.apk
