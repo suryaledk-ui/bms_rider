@@ -104,7 +104,7 @@ class BmsManager extends ChangeNotifier {
           results[id] = ScanCandidate(
             id: id,
             name: name.isEmpty ? old.name : name,
-            guess: guess ?? old.guess,
+            guess: guess == null ? old.guess : familyHint(guess).toString(),
             rssi: r.rssi,
             bonded: old.bonded,
           );
@@ -115,7 +115,7 @@ class BmsManager extends ChangeNotifier {
         results[id] = ScanCandidate(
           id: id,
           name: name.isEmpty ? '(no name)' : name,
-          guess: guess ?? 'Unknown',
+          guess: guess == null ? 'Unknown' : familyHint(guess).toString(),
           rssi: r.rssi,
           bonded: false,
         );
@@ -174,7 +174,10 @@ class BmsManager extends ChangeNotifier {
           state = BmsState.idle;
           status = 'Disconnected — reconnecting…';
           notifyListeners();
-          _scheduleReconnect(Duration(seconds: 1 << _retry.clamp(0, 5)));
+          final backoff = _retry > 3
+              ? const Duration(seconds: 8)
+              : Duration(seconds: 1 << _retry.clamp(0, 3));
+          _scheduleReconnect(backoff);
         }
       }
     });
@@ -346,9 +349,13 @@ class BmsManager extends ChangeNotifier {
 
   void _scheduleReconnect(Duration delay) {
     _retryTimer?.cancel();
-    _retryTimer = Timer(delay, () {
+    // Fight harder: retry quickly, and keep retrying while the ride/device
+    // is expected, with a cap so we never spin forever.
+    final capped = delay > const Duration(seconds: 20) ? const Duration(seconds: 20) : delay;
+    _retryTimer = Timer(capped, () {
       final id = connectedId;
       if (id == null || _intentionalStop) return;
+      _retry++;
       _connectFlow(BluetoothDevice.fromId(id), firstTry: false);
     });
   }
