@@ -1,0 +1,21 @@
+{
+  "project_path": "C:\\Users\\wwwde\\bms_rider",
+  "branch": "main",
+  "result": "failed",
+  "total_duration_s": 328.1,
+  "apk_path": null,
+  "message": "no auto-fix could be applied",
+  "created_at": "2026-11-02T15:36:55.015139+00:00",
+  "attempts": [
+    {
+      "number": 1,
+      "build_id": "6ae8ae2bf9ab34893ca35f57",
+      "status": "preparing",
+      "duration_s": 320.3,
+      "commit_hash": null,
+      "error": "no auto-fix could be applied",
+      "diagnostics": [],
+      "fixes": []
+    }
+  ]
+}
