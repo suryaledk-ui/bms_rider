@@ -2,9 +2,9 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
-import 'package:permission_handler/permission_handler.dart';
 
 import 'models.dart';
+import 'native_permissions.dart';
 import 'protocol.dart';
 import 'protocol_daly.dart';
 import 'protocol_jbd.dart';
@@ -62,17 +62,7 @@ class BmsManager extends ChangeNotifier {
   }
 
   Future<bool> ensurePermissions() async {
-    var ok = true;
-    if (await Permission.bluetoothScan.isDenied) {
-      ok = await Permission.bluetoothScan.request().isGranted && ok;
-    }
-    if (await Permission.bluetoothConnect.isDenied) {
-      ok = await Permission.bluetoothConnect.request().isGranted && ok;
-    }
-    if (await Permission.location.isDenied) {
-      ok = await Permission.location.request().isGranted && ok;
-    }
-    return ok;
+    return NativePermissions.requestBleAndLocation();
   }
 
   Future<bool> init() async {
