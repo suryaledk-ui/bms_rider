@@ -7,6 +7,7 @@ import 'package:wakelock_plus/wakelock_plus.dart';
 
 import 'bms_manager.dart';
 import 'models.dart';
+import 'native_permissions.dart';
 import 'range.dart';
 import 'store.dart';
 
@@ -87,6 +88,12 @@ class AppController extends ChangeNotifier {
     if (ride != null) return;
     final t = bms.latest;
     if (t == null) return;
+
+    // Location is only needed for ride tracking (GPS), not for BLE.
+    final locOk = await NativePermissions.requestLocation();
+    if (!locOk) {
+      return; // user denied location; ride will not start
+    }
 
     ride = ActiveRide()..socStart = t.socPercent;
     lastDiagnostic = null;

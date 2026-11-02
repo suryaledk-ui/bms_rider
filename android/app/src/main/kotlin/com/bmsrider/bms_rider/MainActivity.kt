@@ -20,22 +20,19 @@ class MainActivity : FlutterActivity() {
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, channelName)
             .setMethodCallHandler { call, result ->
                 when (call.method) {
-                    "request" -> {
+                    "requestBle" -> {
                         val perms = mutableListOf<String>()
                         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                             perms.add(Manifest.permission.BLUETOOTH_SCAN)
                             perms.add(Manifest.permission.BLUETOOTH_CONNECT)
-                        }
-                        perms.add(Manifest.permission.ACCESS_FINE_LOCATION)
-                        val missing = perms.filter {
-                            ActivityCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED
-                        }
-                        if (missing.isEmpty()) {
-                            result.success(mapOf("granted" to true))
                         } else {
-                            pendingResult = result
-                            ActivityCompat.requestPermissions(this, missing.toTypedArray(), 1001)
+                            // Android <12: fine location is required for BLE scanning.
+                            perms.add(Manifest.permission.ACCESS_FINE_LOCATION)
                         }
+                        requestImpl(perms, result)
+                    }
+                    "requestLocation" -> {
+                        requestImpl(listOf(Manifest.permission.ACCESS_FINE_LOCATION), result)
                     }
                     "openSettings" -> {
                         val intent = Intent(
@@ -48,6 +45,18 @@ class MainActivity : FlutterActivity() {
                     else -> result.notImplemented()
                 }
             }
+    }
+
+    private fun requestImpl(perms: List<String>, result: MethodChannel.Result) {
+        val missing = perms.filter {
+            ActivityCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED
+        }
+        if (missing.isEmpty()) {
+            result.success(mapOf("granted" to true))
+        } else {
+            pendingResult = result
+            ActivityCompat.requestPermissions(this, missing.toTypedArray(), 1001)
+        }
     }
 
     override fun onRequestPermissionsResult(

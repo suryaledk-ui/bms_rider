@@ -62,7 +62,7 @@ class BmsManager extends ChangeNotifier {
   }
 
   Future<bool> ensurePermissions() async {
-    return NativePermissions.requestBleAndLocation();
+    return NativePermissions.requestBleOnly();
   }
 
   Future<bool> init() async {
@@ -90,39 +90,51 @@ class BmsManager extends ChangeNotifier {
     await FlutterBluePlus.stopScan();
     state = BmsState.scanning;
     candidates = [];
-    status = 'Scanning for scooter BMS…';
+    status = 'Scanning for nearby BLE devices…';
     notifyListeners();
 
     final results = <String, ScanCandidate>{};
     final sub = FlutterBluePlus.scanResults.listen((rs) {
       for (final r in rs) {
         final id = r.device.remoteId.str;
-        if (results.containsKey(id)) continue;
-        final name = r.device.platformName.isEmpty ? '(no name)' : r.device.platformName;
-        final guess = guessFamily(
-          r.advertisementData.serviceUuids,
-          r.device.platformName,
-        );
-        if (guess == null) continue; // filter: only BMS-looking devices
+        final name = r.device.platformName.isEmpty ? '' : r.device.platformName;
+        final guess = guessFamily(r.advertisementData.serviceUuids, name);
+        if (results.containsKey(id)) {
+          final old = results[id]!;
+          results[id] = ScanCandidate(
+            id: id,
+            name: name.isEmpty ? old.name : name,
+            guess: guess ?? old.guess,
+            rssi: r.rssi,
+            bonded: old.bonded,
+          );
+          continue;
+        }
+        // Skip nameless non-BMS noise (no name, no known service).
+        if (guess == null && name.isEmpty) continue;
         results[id] = ScanCandidate(
           id: id,
-          name: name,
-          guess: familyHint(guess),
+          name: name.isEmpty ? '(no name)' : name,
+          guess: guess ?? 'Unknown',
+          rssi: r.rssi,
           bonded: false,
         );
       }
-      candidates = results.values.toList();
+      final list = results.values.toList();
+      list.sort((a, b) {
+        final aKnown = a.guess != 'Unknown' ? 0 : 1;
+        final bKnown = b.guess != 'Unknown' ? 0 : 1;
+        if (aKnown != bKnown) return aKnown - bKnown;
+        return b.rssi.compareTo(a.rssi);
+      });
+      candidates = list.take(50).toList();
       notifyListeners();
     });
 
     try {
       await FlutterBluePlus.startScan(
-        withServices: [
-          Guid('0000ff00-0000-1000-8000-00805f9b34fb'),
-          Guid('0000fff0-0000-1000-8000-00805f9b34fb'),
-          Guid('0000ffe0-0000-1000-8000-00805f9b34fb'),
-        ],
-        timeout: const Duration(seconds: 8),
+        androidCheckLocationServices: false,
+        timeout: const Duration(seconds: 10),
       );
     } catch (e) {
       status = 'Scan error: $e';
@@ -131,7 +143,7 @@ class BmsManager extends ChangeNotifier {
       await FlutterBluePlus.stopScan();
       if (state == BmsState.scanning) {
         state = BmsState.idle;
-        if (candidates.isEmpty) status = 'No BMS found — turn scooter on and retry';
+        if (candidates.isEmpty) status = 'No BLE devices found — turn scooter on and retry';
       }
       notifyListeners();
     }

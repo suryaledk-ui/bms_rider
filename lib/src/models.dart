@@ -88,7 +88,14 @@ class Trip {
 class ScanCandidate {
   final String id;
   final String name;
-  final String guess; // protocol family guess
+  final String guess; // protocol family guess, 'Unknown' if none
+  final int rssi;
   final bool bonded;
-  const ScanCandidate({required this.id, required this.name, required this.guess, required this.bonded});
+  const ScanCandidate({
+    required this.id,
+    required this.name,
+    required this.guess,
+    required this.rssi,
+    required this.bonded,
+  });
 }

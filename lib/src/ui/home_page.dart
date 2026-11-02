@@ -65,7 +65,11 @@ class _HomePageState extends State<HomePage> {
               const Padding(
                 padding: EdgeInsets.all(32),
                 child: Center(
-                  child: Text('Scan for your scooter BMS to begin.'),
+                  child: Text(
+                    'Scan for your scooter BMS to begin.\n'
+                    'Turn the scooter ON first. Location is only needed for ride tracking.',
+                    textAlign: TextAlign.center,
+                  ),
                 ),
               ),
           ],
@@ -90,11 +94,21 @@ class _HomePageState extends State<HomePage> {
             leading: const Icon(Icons.battery_charging_full),
             title: Text(c.name),
             subtitle: Text('${c.guess} · ${c.id}'),
-            trailing: FilledButton.tonal(
-              onPressed: () async {
-                await bms.connectTo(c);
-              },
-              child: const Text('Pair'),
+            trailing: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                Text(
+                  '${c.rssi} dBm',
+                  style: TextStyle(fontSize: 11, color: Theme.of(context).colorScheme.onSurfaceVariant),
+                ),
+                FilledButton.tonal(
+                  onPressed: () async {
+                    await bms.connectTo(c);
+                  },
+                  child: const Text('Pair'),
+                ),
+              ],
             ),
           ),
         );
@@ -264,7 +278,8 @@ class _HomePageState extends State<HomePage> {
                         style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700, color: Theme.of(ctx).colorScheme.onSurface)),
                     const SizedBox(height: 8),
                     Text(
-                      'Turn the scooter ON, keep it near the phone, then scan.',
+                      'Turn the scooter ON, keep it near the phone, then scan. '
+                      'Location permission is NOT needed for connecting — only for ride tracking.',
                       style: TextStyle(color: Theme.of(ctx).colorScheme.onSurfaceVariant),
                     ),
                     const SizedBox(height: 12),
@@ -293,7 +308,7 @@ class _HomePageState extends State<HomePage> {
                             return ListTile(
                               leading: const Icon(Icons.battery_charging_full),
                               title: Text(c.name),
-                              subtitle: Text('${c.guess} · ${c.id}'),
+                              subtitle: Text('${c.guess} · ${c.id} · ${c.rssi} dBm'),
                               trailing: FilledButton.tonal(
                                 onPressed: () async {
                                   await app.bms.connectTo(c);
