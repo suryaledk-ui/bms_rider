@@ -6,7 +6,6 @@ import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.provider.Settings
-import androidx.core.app.ActivityCompat
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
@@ -48,14 +47,18 @@ class MainActivity : FlutterActivity() {
     }
 
     private fun requestImpl(perms: List<String>, result: MethodChannel.Result) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) {
+            result.success(mapOf("granted" to true))
+            return
+        }
         val missing = perms.filter {
-            ActivityCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED
+            checkSelfPermission(it) != PackageManager.PERMISSION_GRANTED
         }
         if (missing.isEmpty()) {
             result.success(mapOf("granted" to true))
         } else {
             pendingResult = result
-            ActivityCompat.requestPermissions(this, missing.toTypedArray(), 1001)
+            requestPermissions(missing.toTypedArray(), 1001)
         }
     }
 

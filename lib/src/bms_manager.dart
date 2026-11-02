@@ -49,21 +49,23 @@ class BmsManager extends ChangeNotifier {
   }
 
   Future<bool> ensureAdapterOn() async {
+    _lg('BT', 'adapter state at check: ${FlutterBluePlus.adapterStateNow}');
     if (FlutterBluePlus.adapterStateNow == BluetoothAdapterState.on) return true;
     try {
-      await FlutterBluePlus.adapterState
-          .where((s) => s == BluetoothAdapterState.on)
-          .timeout(const Duration(seconds: 10))
-          .first;
-      return true;
-    } catch (_) {
-      try {
-        await FlutterBluePlus.turnOn();
-        return FlutterBluePlus.adapterStateNow == BluetoothAdapterState.on;
-      } catch (_) {
-        return false;
+      await FlutterBluePlus.turnOn();
+    } catch (e) {
+      _lg('BT', 'turnOn() threw: $e');
+    }
+    // Poll the actual state for up to 5s instead of trusting turnOn() alone.
+    for (var i = 0; i < 25; i++) {
+      await Future<void>.delayed(const Duration(milliseconds: 200));
+      if (FlutterBluePlus.adapterStateNow == BluetoothAdapterState.on) {
+        _lg('BT', 'adapter now ON');
+        return true;
       }
     }
+    _lg('BT', 'adapter failed to turn on (state=${FlutterBluePlus.adapterStateNow})');
+    return false;
   }
 
   Future<bool> ensurePermissions() async {
@@ -92,12 +94,39 @@ class BmsManager extends ChangeNotifier {
   }
 
   Future<void> scan() async {
-    if (state == BmsState.scanning) return;
+    if (state == BmsState.scanning) {
+      _lg('SCAN', 'scan() ignored — already scanning');
+      return;
+    }
     await FlutterBluePlus.stopScan();
+
+    // Preflight 1: adapter must actually be ON.
+    if (!await ensureAdapterOn()) {
+      state = BmsState.error;
+      status = 'Bluetooth is OFF — turn it on (Quick Settings) and try again';
+      _lg('SCAN', 'aborted: adapter not on');
+      notifyListeners();
+      return;
+    }
+
+    // Preflight 2: permissions must actually be granted.
+    if (!await ensurePermissions()) {
+      state = BmsState.error;
+      status = 'Bluetooth permission denied — allow it in Settings and try again';
+      _lg('SCAN', 'aborted: permissions missing/denied');
+      notifyListeners();
+      return;
+    }
+
+    // Small settle delay after granting permissions: the very first scan on
+    // several Android phones (Samsung/realme) returns empty if started too
+    // quickly after the permission dialog closes.
+    await Future<void>.delayed(const Duration(milliseconds: 400));
+
     state = BmsState.scanning;
     candidates = [];
     status = 'Scanning for nearby BLE devices…';
-    _lg('SCAN', 'scan started (all devices, no filters)');
+    _lg('SCAN', 'scan started (all devices, no filters) adapter=${FlutterBluePlus.adapterStateNow}');
     notifyListeners();
 
     final results = <String, ScanCandidate>{};
@@ -151,7 +180,7 @@ class BmsManager extends ChangeNotifier {
       );
     } catch (e) {
       status = 'Scan error: $e';
-      _lg('SCAN', 'scan error: $e');
+      _lg('SCAN', 'scan threw: $e');
     } finally {
       await sub.cancel();
       await FlutterBluePlus.stopScan();

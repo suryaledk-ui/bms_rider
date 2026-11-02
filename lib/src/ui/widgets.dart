@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 
 import '../bms_manager.dart';
@@ -192,4 +194,124 @@ class ConnectionBanner extends StatelessWidget {
       ),
     );
   }
+}
+
+/// Animated bluetooth sonar used while scanning for the scooter BMS.
+class ScanRadar extends StatefulWidget {
+  final double size;
+  const ScanRadar({super.key, this.size = 180});
+
+  @override
+  State<ScanRadar> createState() => _ScanRadarState();
+}
+
+class _ScanRadarState extends State<ScanRadar> with SingleTickerProviderStateMixin {
+  late final AnimationController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 2200),
+    )..repeat();
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final primary = Theme.of(context).colorScheme.primary;
+    return SizedBox(
+      width: widget.size,
+      height: widget.size,
+      child: AnimatedBuilder(
+        animation: _controller,
+        builder: (_, __) {
+          return Stack(
+            alignment: Alignment.center,
+            children: [
+              CustomPaint(
+                size: Size.square(widget.size),
+                painter: _RadarPainter(progress: _controller.value, color: primary),
+              ),
+              Icon(Icons.bluetooth_searching, size: widget.size * 0.22, color: primary),
+            ],
+          );
+        },
+      ),
+    );
+  }
+}
+
+class _RadarPainter extends CustomPainter {
+  final double progress;
+  final Color color;
+  _RadarPainter({required this.progress, required this.color});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final center = Offset(size.width / 2, size.height / 2);
+    final maxR = size.width / 2;
+
+    // Static rings
+    final ring = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1.5
+      ..color = color.withValues(alpha: 0.22);
+    canvas.drawCircle(center, maxR, ring);
+    canvas.drawCircle(center, maxR * 0.66, ring);
+    canvas.drawCircle(center, maxR * 0.33, ring);
+
+    // Pulse rings expanding outward
+    for (var i = 0; i < 3; i++) {
+      final f = (progress + i / 3.0) % 1.0;
+      final r = maxR * (0.12 + 0.88 * f);
+      final a = (1.0 - f) * 0.30;
+      final p = Paint()
+        ..style = PaintingStyle.fill
+        ..color = color.withValues(alpha: a);
+      canvas.drawCircle(center, r, p);
+    }
+
+    // Rotating sweep beam with trailing gradient
+    final sweepStart = progress * 2 * math.pi;
+    const trail = 0.7;
+    final beam = Paint()
+      ..shader = SweepGradient(
+        colors: [
+          color.withValues(alpha: 0.40),
+          color.withValues(alpha: 0.0),
+        ],
+        stops: const [0.0, 1.0],
+        startAngle: sweepStart - trail,
+        endAngle: sweepStart,
+      ).createShader(Rect.fromCircle(center: center, radius: maxR));
+    canvas.drawArc(
+      Rect.fromCircle(center: center, radius: maxR),
+      sweepStart - trail,
+      trail,
+      true,
+      beam,
+    );
+
+    // Leading edge
+    final line = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 2
+      ..color = color;
+    canvas.drawLine(
+      center,
+      center + Offset(math.cos(sweepStart), math.sin(sweepStart)) * maxR,
+      line,
+    );
+  }
+
+  @override
+  bool shouldRepaint(covariant _RadarPainter old) =>
+      old.progress != progress || old.color != color;
 }

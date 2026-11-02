@@ -79,10 +79,6 @@ class AppController extends ChangeNotifier {
   }
 
   Future<void> requestPermissionsAndScan() async {
-    final adapterOk = await bms.ensureAdapterOn();
-    if (!adapterOk) return;
-    final permOk = await bms.ensurePermissions();
-    if (!permOk) return;
     await bms.scan();
   }
 

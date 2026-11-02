@@ -53,7 +53,29 @@ class _HomePageState extends State<HomePage> {
               protocol: bms.proto?.name,
               onTap: () => _showScanSheet(context, app),
             ),
-            if (bms.candidates.isNotEmpty) ..._candidateList(app),
+            if (bms.state == BmsState.scanning)
+              Padding(
+                padding: const EdgeInsets.only(top: 16),
+                child: Column(
+                  children: [
+                    const ScanRadar(),
+                    const SizedBox(height: 16),
+                    Text(
+                      'Listening for your scooter…',
+                      style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      'Keep the scooter ON and nearby',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: Theme.of(context).colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            if (bms.state != BmsState.scanning && bms.candidates.isNotEmpty) ..._candidateList(app),
             if (bms.latest != null) ..._liveSection(context, app),
             if (app.ride == null && bms.latest != null)
               Padding(
@@ -297,11 +319,21 @@ class _HomePageState extends State<HomePage> {
                         await app.requestPermissionsAndScan();
                         setSheetState(() => _scanning = false);
                       },
-                      icon: Icon(_scanning ? Icons.sync : Icons.bluetooth_searching),
+                      icon: Icon(_scanning ? Icons.bluetooth_searching : Icons.bluetooth_searching),
                       label: Text(_scanning ? 'Scanning…' : 'Scan for BMS'),
                     ),
                     const SizedBox(height: 12),
-                    if (app.bms.candidates.isEmpty)
+                    if (_scanning)
+                      Center(
+                        child: Column(
+                          children: const [
+                            ScanRadar(size: 110),
+                            SizedBox(height: 12),
+                            Text('Looking for your scooter…'),
+                          ],
+                        ),
+                      )
+                    else if (app.bms.candidates.isEmpty)
                       Text(
                         'No BMS found yet.',
                         style: TextStyle(color: Theme.of(ctx).colorScheme.onSurfaceVariant),
