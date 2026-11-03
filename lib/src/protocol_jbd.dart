@@ -1,4 +1,4 @@
-import 'dart:typed_data';
+import 'package:flutter/foundation.dart';
 
 import 'models.dart';
 import 'protocol.dart';
@@ -22,8 +22,10 @@ class JbdProtocol implements BmsProtocol {
   final List<int> _buf = [];
   Telemetry? _last;
 
-  static final Uint8List _readBasic = Uint8List.fromList([0xDD, 0xA5, 0x03, 0x00, 0xFF, 0xFD, 0x77]);
-  static final Uint8List _readCells = Uint8List.fromList([0xDD, 0xA5, 0x04, 0x00, 0xFF, 0xFC, 0x77]);
+  static final Uint8List _readBasic =
+      Uint8List.fromList([0xDD, 0xA5, 0x03, 0x00, 0xFF, 0xFD, 0x77]);
+  static final Uint8List _readCells =
+      Uint8List.fromList([0xDD, 0xA5, 0x04, 0x00, 0xFF, 0xFC, 0x77]);
 
   @override
   Future<bool> init() async {
@@ -121,7 +123,7 @@ class JbdProtocol implements BmsProtocol {
     final div = unitFlag ? 0.1 : 0.01;
 
     final voltage = rdU16BE(p, 0) * 0.01;
-    final current = rdI16BE(p, 2) * div;
+    final current = _parseCurrent(p, unitFlag, div);
     final residual = rdU16BE(p, 4) * div;
     final nominal = rdU16BE(p, 6) * div;
     final cycles = rdU16BE(p, 8);
@@ -154,6 +156,41 @@ class JbdProtocol implements BmsProtocol {
       ts: DateTime.now(),
     );
     _emit();
+  }
+
+  static const double _maxPlausibleAmps = 150.0; // beyond any scooter BMS
+  bool _warnedUnitFlip = false;
+  bool _warnedAbsurdCurrent = false;
+
+  /// Signed current in amperes (positive = discharge), with clone-proofing:
+  /// the unit flag bit is unreliable on several JBD clones, so when the raw
+  /// value would decode to an implausible current we retry with the OTHER
+  /// unit (0.01A vs 0.1A) and accept it if it lands in-range. Absurd values
+  /// that survive both interpretations are zeroed (never forwarded as
+  /// thousands of amps). Sign is preserved as sent — the controller already
+  /// handles inverted-sign clones.
+  double _parseCurrent(List<int> p, bool unitFlag, double div) {
+    final raw = rdI16BE(p, 2);
+    if (raw == 0) return 0;
+    var current = raw * div;
+    if (current.abs() <= _maxPlausibleAmps) return current;
+
+    final altCurrent = raw * (unitFlag ? 0.01 : 0.1);
+    if (altCurrent.abs() <= _maxPlausibleAmps) {
+      if (!_warnedUnitFlip) {
+        _warnedUnitFlip = true;
+        debugPrint('[JBD] current unit-flag flip: raw=$raw '
+            '(decoded ${current.toStringAsFixed(1)}A → '
+            '${altCurrent.toStringAsFixed(1)}A)');
+      }
+      return altCurrent;
+    }
+    if (!_warnedAbsurdCurrent) {
+      _warnedAbsurdCurrent = true;
+      debugPrint('[JBD] absurd current raw=$raw unitFlag=$unitFlag '
+          '(both units out of range) → 0');
+    }
+    return 0;
   }
 
   void _parseCells(List<int> p) {

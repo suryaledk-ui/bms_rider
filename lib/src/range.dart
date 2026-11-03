@@ -253,6 +253,11 @@ typedef MlInput = ({
   double? headwindKmh,
 });
 
+/// ML contribution metadata for one mode's range row: number of completed
+/// rides in the online model, its MAE EMA, and the effective Wh/km the
+/// range engine actually used for that row.
+typedef MlUsed = ({double n, double emaMae, double whPerKm});
+
 class RangeReport {
   final double ecoKm;
   final double sportsKm;

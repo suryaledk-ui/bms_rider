@@ -255,7 +255,11 @@ class _HomePageState extends State<HomePage> {
       speed,
       0,
       cutoffSocPercent: app.store.cutoffSocPercent,
+      // Use the learned ML blend per mode once it is warm (n ≥ 5); it
+      // falls back to physics × rider factor otherwise.
+      mlPredict: (m, i) => app.ml.predictIfEnough(m, i),
     );
+    final learnedByMode = app.mlLearnedFor();
 
     return [
       // ---- Hero SOC block ----
@@ -391,7 +395,7 @@ class _HomePageState extends State<HomePage> {
         title: 'What your pack gives you',
         icon: Icons.route_rounded,
       ),
-      _rangeCard(report: report, mode: mode),
+      _rangeCard(report: report, mode: mode, learned: learnedByMode),
       const SizedBox(height: 10),
 
       // ---- Ride controls ----
@@ -766,7 +770,11 @@ class _HomePageState extends State<HomePage> {
   // Range card
   // ---------------------------------------------------------------------
 
-  Widget _rangeCard({required RangeReport report, required RideMode mode}) {
+  Widget _rangeCard({
+    required RangeReport report,
+    required RideMode mode,
+    required Map<RideMode, MlUsed> learned,
+  }) {
     final rows =
         <({String label, String sub, double km, bool active, bool now})>[
       (
@@ -815,6 +823,36 @@ class _HomePageState extends State<HomePage> {
               color: VoltTokens.textSecondary,
             ),
           ),
+          // Subtle “learned” indicator: shown per mode when the online ML
+          // model is warm (n ≥ 5) and actually drove that row's estimate.
+          if (learned.isNotEmpty) ...[
+            const SizedBox(height: 8),
+            for (final e in learned.entries)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 2),
+                child: Row(
+                  children: [
+                    Icon(
+                      Icons.auto_graph_rounded,
+                      size: 12,
+                      color: VoltTokens.voltMint.withValues(alpha: 0.8),
+                    ),
+                    const SizedBox(width: 5),
+                    Expanded(
+                      child: Text(
+                        'learned · ${modeName(e.key).toLowerCase()} · '
+                        'n=${e.value.n.floor()} · '
+                        '${e.value.whPerKm.toStringAsFixed(1)} Wh/km',
+                        style: VoltType.caption.copyWith(
+                          fontSize: 11,
+                          color: VoltTokens.textMuted,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+          ],
         ],
       ),
     );

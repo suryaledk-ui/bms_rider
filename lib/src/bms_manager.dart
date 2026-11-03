@@ -45,14 +45,18 @@ class BmsManager extends ChangeNotifier {
   void attachLogger(ScanLogger log) => _log = log;
   void _lg(String tag, String msg) => _log?.log(tag, msg);
 
-  void attachStorage({required String Function() getSavedId, required void Function(String) setSavedId}) {
+  void attachStorage(
+      {required String Function() getSavedId,
+      required void Function(String) setSavedId}) {
     _getSavedId = getSavedId;
     _setSavedId = setSavedId;
   }
 
   Future<bool> ensureAdapterOn() async {
     _lg('BT', 'adapter state at check: ${FlutterBluePlus.adapterStateNow}');
-    if (FlutterBluePlus.adapterStateNow == BluetoothAdapterState.on) return true;
+    if (FlutterBluePlus.adapterStateNow == BluetoothAdapterState.on) {
+      return true;
+    }
     try {
       await FlutterBluePlus.turnOn();
     } catch (e) {
@@ -66,7 +70,8 @@ class BmsManager extends ChangeNotifier {
         return true;
       }
     }
-    _lg('BT', 'adapter failed to turn on (state=${FlutterBluePlus.adapterStateNow})');
+    _lg('BT',
+        'adapter failed to turn on (state=${FlutterBluePlus.adapterStateNow})');
     return false;
   }
 
@@ -79,7 +84,9 @@ class BmsManager extends ChangeNotifier {
     FlutterBluePlus.setOperationQueueMode(OperationQueueMode.perDevice);
 
     FlutterBluePlus.adapterState.listen((s) {
-      if (s == BluetoothAdapterState.on && _device != null && !_intentionalStop) {
+      if (s == BluetoothAdapterState.on &&
+          _device != null &&
+          !_intentionalStop) {
         _scheduleReconnect(Duration.zero);
       }
     });
@@ -118,7 +125,8 @@ class BmsManager extends ChangeNotifier {
 
     // Preflight 1: adapter must actually be ON.
     final adapterOn = await ensureAdapterOn();
-    debugPrint('[SCANDBG] adapterOn=$adapterOn state=${FlutterBluePlus.adapterStateNow}');
+    debugPrint(
+        '[SCANDBG] adapterOn=$adapterOn state=${FlutterBluePlus.adapterStateNow}');
     if (!adapterOn) {
       state = BmsState.error;
       status = 'Bluetooth is OFF — turn it on (Quick Settings) and try again';
@@ -132,7 +140,8 @@ class BmsManager extends ChangeNotifier {
     debugPrint('[SCANDBG] permissionsOk=$permOk');
     if (!permOk) {
       state = BmsState.error;
-      status = 'Bluetooth permission denied — allow it in Settings and try again';
+      status =
+          'Bluetooth permission denied — allow it in Settings and try again';
       _lg('SCAN', 'aborted: permissions missing/denied');
       notifyListeners();
       return;
@@ -146,7 +155,8 @@ class BmsManager extends ChangeNotifier {
       debugPrint('[SCANDBG] locationServicesOn=$locationOn');
       if (!locationOn) {
         state = BmsState.error;
-        status = 'Location Services are OFF — enable GPS Location in Quick Settings, then scan again';
+        status =
+            'Location Services are OFF — enable GPS Location in Quick Settings, then scan again';
         _lg('SCAN', 'aborted: location services off');
         notifyListeners();
         return;
@@ -161,8 +171,10 @@ class BmsManager extends ChangeNotifier {
     state = BmsState.scanning;
     candidates = [];
     status = 'Scanning for nearby BLE devices…';
-    _lg('SCAN', 'scan started (all devices, no filters) adapter=${FlutterBluePlus.adapterStateNow}');
-    debugPrint('[SCANDBG] starting scan isScanningNow=${FlutterBluePlus.isScanningNow}');
+    _lg('SCAN',
+        'scan started (all devices, no filters) adapter=${FlutterBluePlus.adapterStateNow}');
+    debugPrint(
+        '[SCANDBG] starting scan isScanningNow=${FlutterBluePlus.isScanningNow}');
     notifyListeners();
 
     // Phase 1: NATIVE LEGACY scan (BluetoothAdapter.startLeScan) — the exact
@@ -193,7 +205,8 @@ class BmsManager extends ChangeNotifier {
     final started = DateTime.now();
     final raw = await NativeLegacyScan.scan(const Duration(seconds: 8));
     final elapsed = DateTime.now().difference(started).inMilliseconds;
-    debugPrint('[SCANDBG] native legacy scan done in ${elapsed}ms results=${raw.length}');
+    debugPrint(
+        '[SCANDBG] native legacy scan done in ${elapsed}ms results=${raw.length}');
 
     final results = <String, ScanCandidate>{};
     for (final r in raw) {
@@ -208,7 +221,8 @@ class BmsManager extends ChangeNotifier {
         rssi: r.rssi,
         bonded: false,
       );
-      debugPrint('[SCANDBG] [legacy] seen ${r.id} name="${r.name.isEmpty ? '(none)' : r.name}" '
+      debugPrint(
+          '[SCANDBG] [legacy] seen ${r.id} name="${r.name.isEmpty ? '(none)' : r.name}" '
           'rssi=${r.rssi} family=${guess == null ? 'unknown' : familyHint(guess)}');
     }
     final list = results.values.toList();
@@ -248,7 +262,8 @@ class BmsManager extends ChangeNotifier {
           rssi: r.rssi,
           bonded: false,
         );
-        debugPrint('[SCANDBG] [fbp] seen $id name="${name.isEmpty ? '(none)' : name}" '
+        debugPrint(
+            '[SCANDBG] [fbp] seen $id name="${name.isEmpty ? '(none)' : name}" '
             'svcs=${r.advertisementData.serviceUuids.map((g) => g.toString()).join(',')} '
             'rssi=${r.rssi} family=${guess == null ? 'unknown' : familyHint(guess)}');
       }
@@ -285,22 +300,26 @@ class BmsManager extends ChangeNotifier {
     connectedId = c.id;
     connectedName = c.name;
     _setSavedId?.call(c.id);
-    _lg('CONN', 'user selected ${c.id} name="${c.name}" guess=${c.guess} rssi=${c.rssi}');
+    _lg('CONN',
+        'user selected ${c.id} name="${c.name}" guess=${c.guess} rssi=${c.rssi}');
     await _connectFlow(BluetoothDevice.fromId(c.id), firstTry: true);
   }
 
-  Future<void> _connectFlow(BluetoothDevice device, {required bool firstTry}) async {
+  Future<void> _connectFlow(BluetoothDevice device,
+      {required bool firstTry}) async {
     if (_connecting) return;
     _connecting = true;
     state = BmsState.connecting;
     status = 'Connecting to ${connectedName ?? device.platformName}…';
-    _lg('CONN', 'attempt to ${device.remoteId.str} name="${connectedName ?? device.platformName}" firstTry=$firstTry');
+    _lg('CONN',
+        'attempt to ${device.remoteId.str} name="${connectedName ?? device.platformName}" firstTry=$firstTry');
     notifyListeners();
     _device = device;
 
     _stateSub ??= device.connectionState.listen((s) {
       if (s == BluetoothConnectionState.disconnected) {
-        _lg('CONN', 'disconnected from ${device.remoteId.str} (intentional=$_intentionalStop)');
+        _lg('CONN',
+            'disconnected from ${device.remoteId.str} (intentional=$_intentionalStop)');
         latest = null;
         proto?.dispose();
         proto = null;
@@ -343,7 +362,9 @@ class BmsManager extends ChangeNotifier {
       if (!ok) {
         _connecting = false;
         state = BmsState.error;
-        status = firstTry ? 'Could not find scooter (power it on)' : 'Connection failed: $e';
+        status = firstTry
+            ? 'Could not find scooter (power it on)'
+            : 'Connection failed: $e';
         _lg('CONN', 'connect failed firstTry=$firstTry err=$e');
         notifyListeners();
         return;
@@ -379,12 +400,16 @@ class BmsManager extends ChangeNotifier {
 
     BluetoothService? pick(Guid g) {
       for (final s in services) {
-        if (s.uuid.toString().toLowerCase() == g.toString().toLowerCase()) return s;
+        if (s.uuid.toString().toLowerCase() == g.toString().toLowerCase()) {
+          return s;
+        }
       }
       return null;
     }
 
-    svc = pick(guidShort(0xff00)) ?? pick(guidShort(0xfff0)) ?? pick(guidShort(0xffe0));
+    svc = pick(guidShort(0xff00)) ??
+        pick(guidShort(0xfff0)) ??
+        pick(guidShort(0xffe0));
     svc ??= services.cast<BluetoothService?>().firstWhere(
           (s) => s!.characteristics.any((c) => c.properties.notify),
           orElse: () => null,
@@ -402,7 +427,8 @@ class BmsManager extends ChangeNotifier {
     BluetoothCharacteristic? tx;
     for (final c in svc.characteristics) {
       rx ??= c.properties.notify ? c : null;
-      tx ??= (c.properties.write || c.properties.writeWithoutResponse) ? c : null;
+      tx ??=
+          (c.properties.write || c.properties.writeWithoutResponse) ? c : null;
     }
     if (rx == null || tx == null) {
       status = 'BMS service missing RX/TX characteristics';
@@ -417,8 +443,8 @@ class BmsManager extends ChangeNotifier {
     // write-without-response only. Writing "with response" to those fails
     // silently on Android, so no frames ever reach the BMS. Match the
     // characteristic's actual properties.
-    final writeWithoutResponse =
-        writeChar.properties.writeWithoutResponse && !writeChar.properties.write;
+    final writeWithoutResponse = writeChar.properties.writeWithoutResponse &&
+        !writeChar.properties.write;
 
     final family = _detectFamily(services, device.platformName);
     _lg('CONN', 'protocol family detected: $family for ${device.remoteId.str}');
@@ -537,8 +563,12 @@ class BmsManager extends ChangeNotifier {
     return DateTime.now().difference(t).inSeconds;
   }
 
-  /// True while telemetry is live: data has arrived and is at most 3s old.
-  bool get dataFresh => dataAgeSeconds >= 0 && dataAgeSeconds <= 3;
+  /// True while telemetry is live: data has arrived and is at most 5s old.
+  ///
+  /// Polling runs at 500 ms but several JBD clones answer only every 1–2 s
+  /// under load; 3s mislabeled those healthy boards as stale. 5s still
+  /// covers ~10 missed polls before the UI shows NOT LIVE.
+  bool get dataFresh => dataAgeSeconds >= 0 && dataAgeSeconds <= 5;
 
   DateTime? get lastDataAt => _lastDataAt;
 
@@ -556,7 +586,8 @@ class BmsManager extends ChangeNotifier {
         _intentionalStop = false;
         _device?.disconnect(); // state listener schedules reconnect
       }
-    } else if (age > 4) {
+    } else if (age > 8) {
+      // Above the 5s "fresh" window but below the force-reconnect cut.
       status = 'Not receiving data — move closer to scooter';
       notifyListeners();
     }
@@ -588,7 +619,9 @@ class BmsManager extends ChangeNotifier {
     _retryTimer?.cancel();
     // Fight harder: retry quickly, and keep retrying while the ride/device
     // is expected, with a cap so we never spin forever.
-    final capped = delay > const Duration(seconds: 20) ? const Duration(seconds: 20) : delay;
+    final capped = delay > const Duration(seconds: 20)
+        ? const Duration(seconds: 20)
+        : delay;
     _retryTimer = Timer(capped, () {
       final id = connectedId;
       if (id == null || _intentionalStop) return;

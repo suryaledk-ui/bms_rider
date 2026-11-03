@@ -28,6 +28,10 @@ class ActiveRide {
   double avgSpeedKmh = 0;
   int stops = 0;
   bool wasMoving = false;
+
+  /// Consecutive GPS reports below the motion threshold; a stop event only
+  /// fires after ~2s of sustained low speed (GPS jitter immunity).
+  int lowSpeedStreak = 0;
   final Map<RideMode, double> modeSeconds = {
     for (final m in RideMode.values) m: 0.0,
   };
@@ -41,10 +45,71 @@ class ActiveRide {
   }
 }
 
+/// Filters raw GPS speed (km/h) against standstill jitter.
+///
+/// GPS position noise routinely produces 0–10 km/h "ghost speed" while the
+/// scooter is parked. Rules:
+///  - raw < 2.5 km/h → hard dead zone, output 0 (and stays 0);
+///  - raw ≥ 5 km/h   → normal EMA smoothing, treated as definitely moving;
+///  - 2.5–5 km/h     → ambiguous band: if we were recently moving (coast-
+///    down) keep the EMA so braking looks smooth; when starting from
+///    stationary, remain 0 unless 2 CONSECUTIVE reports are > 3 km/h
+///    (hysteresis against jitter spikes).
+class SpeedFilter {
+  static const double deadZoneKmh = 2.5;
+  static const double clearMovingKmh = 5.0;
+  static const double minBelieveKmh = 3.0;
+  static const int believeStreak = 2;
+  static const double emaAlpha = 0.25;
+
+  double smoothed = 0;
+  bool wasMoving = false;
+  int _bandStreak = 0;
+
+  double update(double raw) {
+    if (raw < deadZoneKmh) {
+      smoothed = 0;
+      wasMoving = false;
+      _bandStreak = 0;
+    } else if (raw >= clearMovingKmh) {
+      smoothed += (raw - smoothed) * emaAlpha;
+      wasMoving = true;
+      _bandStreak = 0;
+    } else if (wasMoving) {
+      // Coast-down through the band from real motion: keep the EMA.
+      smoothed += (raw - smoothed) * emaAlpha;
+    } else if (raw > minBelieveKmh) {
+      _bandStreak++;
+      if (_bandStreak >= believeStreak) {
+        smoothed += (raw - smoothed) * emaAlpha;
+        wasMoving = true;
+        _bandStreak = 0;
+      } else {
+        smoothed = 0;
+      }
+    } else {
+      _bandStreak = 0;
+      smoothed = 0;
+    }
+    return smoothed;
+  }
+
+  void reset() {
+    smoothed = 0;
+    wasMoving = false;
+    _bandStreak = 0;
+  }
+}
+
 class AppController extends ChangeNotifier {
   final BmsManager bms = BmsManager();
   final AppStore store = AppStore();
   final ScanLogger scanLog = ScanLogger();
+
+  /// 30s telemetry snapshot logger (tag TELE) — evidence for next-ride
+  /// debugging. Reuses one StringBuffer to avoid allocation churn.
+  Timer? _teleLogTimer;
+  final StringBuffer _teleBuf = StringBuffer();
   late RangeEngine range;
   late final RangeMl ml;
 
@@ -71,6 +136,12 @@ class AppController extends ChangeNotifier {
     await scanLog.init();
     bms.attachLogger(scanLog);
     bms.telemetry.listen(_onTelemetry);
+    // Low-rate telemetry evidence logger: one compact line every 30s so
+    // next-ride logs prove current/power integration is live (tag TELE).
+    _teleLogTimer ??= Timer.periodic(
+      const Duration(seconds: 30),
+      (_) => _logTelemetry(),
+    );
     final mass = store.scooterWeightKg + store.riderWeightKg;
     final estimator = RangeEstimator(massKg: mass);
     range = RangeEngine(
@@ -95,6 +166,23 @@ class AppController extends ChangeNotifier {
   }
 
   bool _autoScanFired = false;
+
+  /// One-line telemetry snapshot every 30s while connected: V/A/W/SOC + data
+  /// age. Lets us confirm current integration is live on the next real ride
+  /// (0A while moving would show up here).
+  void _logTelemetry() {
+    if (bms.state != BmsState.connected) return;
+    final t = bms.latest;
+    if (t == null) return;
+    _teleBuf
+      ..clear()
+      ..write('V=${t.voltageV.toStringAsFixed(1)} ')
+      ..write('A=${t.currentA.toStringAsFixed(2)} ')
+      ..write('W=${t.powerW.toStringAsFixed(0)} ')
+      ..write('SOC=${t.socPercent}% ')
+      ..write('age=${bms.dataAgeSeconds}s');
+    scanLog.log('TELE', _teleBuf.toString());
+  }
 
   Future<void> refreshHistory() async {
     history = await store.rides();
@@ -269,6 +357,31 @@ class AppController extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Learned-model info per mode for the range card, populated only when the
+  /// online ML model is warm (n ≥ 5) for that mode. The reported Wh/km is
+  /// exactly what [RangeEngine.report] uses via [RangeMl.predictIfEnough],
+  /// so the UI note always matches the card's numbers.
+  Map<RideMode, MlUsed> mlLearnedFor() {
+    final res = <RideMode, MlUsed>{};
+    final massKg = store.scooterWeightKg + store.riderWeightKg;
+    for (final m in RideMode.values) {
+      final n = ml.rideCount(m);
+      if (n < 5) continue;
+      final input = (
+        speedKmh: RangeEstimator.refSpeed(m),
+        stopsPerKm: 0.0,
+        massKg: massKg,
+        tirePsi: store.tirePressurePsi,
+        tempC: weather?.tempC,
+        headwindKmh: weather?.headwindKmh(90),
+      );
+      final ec = ml.predictIfEnough(m, input);
+      if (ec == null) continue;
+      res[m] = (n: n, emaMae: ml.emaMaeFor(m), whPerKm: ec);
+    }
+    return res;
+  }
+
   Future<void> requestPermissionsAndScan() async {
     await bms.scan();
   }
@@ -278,12 +391,13 @@ class AppController extends ChangeNotifier {
     scanLog.log('NOTIFY', '$title — $body');
   }
 
-  double get currentSpeedKmh => gpsSpeedKmh;
+  double get currentSpeedKmh => smoothedSpeedKmh;
 
-  /// Speed used for display + live range: EMA-smoothed version of the raw
-  /// GPS speed, so the UI doesn't jump around (GPS is noisy/jittery).
-  double _smoothedSpeedKmh = 0;
-  double get smoothedSpeedKmh => _smoothedSpeedKmh;
+  /// Speed used for display + live range: dead-zone + hysteresis filtered
+  /// version of the raw GPS speed (see [SpeedFilter]), so the UI doesn't
+  /// show ghost speed while parked and doesn't jump around when moving.
+  final SpeedFilter _speedFilter = SpeedFilter();
+  double get smoothedSpeedKmh => _speedFilter.smoothed;
 
   Future<void> startRide() async {
     if (ride != null) return;
@@ -297,6 +411,7 @@ class AppController extends ChangeNotifier {
     }
 
     ride = ActiveRide()..socStart = t.socPercent;
+    _speedFilter.reset();
     lastDiagnostic = null;
     await WakelockPlus.enable();
 
@@ -324,10 +439,10 @@ class AppController extends ChangeNotifier {
       r.hasFix = true;
       gpsSpeedKmh = pos.speed * 3.6;
       gpsHeadingDeg = pos.heading;
-      // EMA smoothing: fast enough to feel instant, slow enough to hide
-      // GPS jitter (alpha ~0.25 → settle in ~2–3 updates).
-      _smoothedSpeedKmh += (gpsSpeedKmh - _smoothedSpeedKmh) * 0.25;
-      if (gpsSpeedKmh > r.maxSpeed) r.maxSpeed = gpsSpeedKmh;
+      // Dead-zone + hysteresis filter kills ghost speed while parked while
+      // preserving the EMA smoothing for real motion (see SpeedFilter).
+      final speed = _speedFilter.update(gpsSpeedKmh);
+      if (speed > r.maxSpeed) r.maxSpeed = speed;
 
       // Fetch ambient weather once per ride (temp/wind for range accuracy).
       if (!_weatherFetched) {
@@ -340,12 +455,20 @@ class AppController extends ChangeNotifier {
         });
       }
 
-      final moving = gpsSpeedKmh > 1.5;
-      if (!moving && r.wasMoving) {
-        // stop event: moving -> stationary
-        r.stops++;
+      // Stop detection with hysteresis: only count a stop after ~2s (4
+      // reports at 500ms) of sustained low speed — a single jitter dip
+      // must not count as a stop.
+      final moving = speed > 1.5;
+      if (moving) {
+        r.lowSpeedStreak = 0;
+        r.wasMoving = true;
+      } else {
+        r.lowSpeedStreak++;
+        if (r.lowSpeedStreak >= 4 && r.wasMoving) {
+          r.stops++;
+          r.wasMoving = false;
+        }
       }
-      r.wasMoving = moving;
       notifyListeners();
     }, onError: (_) {});
 
@@ -468,11 +591,29 @@ class AppController extends ChangeNotifier {
       final ratio = whPerKm / expected;
       range.factors = range.factors.updated(dom, ratio);
       await store.saveFactors(range.factors);
+
+      // Online ML update with the same trip features as the factor
+      // calibration. This was previously missing — without it the model's
+      // ride count never grew past 0, so the learned blend (n ≥ 5) silently
+      // never engaged and ML state was never persisted.
+      ml.update(
+        dom,
+        speedKmh: trip.avgSpeedKmh,
+        stopsPerKm: stopsPerKm,
+        massKg: massKg,
+        tirePsi: store.tirePressurePsi,
+        tempC: weather?.tempC,
+        headwindKmh: weather?.headwindKmh(90),
+        whPerKm: whPerKm,
+      );
+      await store.setMlState(ml.toJson());
+
       scanLog.log(
           'BMS',
           'calibration: ${whPerKm.toStringAsFixed(1)}Wh/km vs '
               'expected ${expected.toStringAsFixed(1)} (${modeName(dom)}, '
-              '${massKg.toStringAsFixed(0)}kg) → factor ${ratio.toStringAsFixed(2)}');
+              '${massKg.toStringAsFixed(0)}kg) → factor ${ratio.toStringAsFixed(2)} '
+              '· ml n=${ml.rideCount(dom).floor()}');
 
       final lastCheck = store.tirePressureCheckedAt;
       final daysSinceCheck =
@@ -493,6 +634,7 @@ class AppController extends ChangeNotifier {
     await refreshHistory();
     ride = null;
     gpsSpeedKmh = 0;
+    _speedFilter.reset();
     notifyListeners();
   }
 
@@ -514,6 +656,7 @@ class AppController extends ChangeNotifier {
   void dispose() {
     _gpsSub?.cancel();
     _rideTimer?.cancel();
+    _teleLogTimer?.cancel();
     bms.dispose();
     super.dispose();
   }
