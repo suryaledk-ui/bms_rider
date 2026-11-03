@@ -486,12 +486,15 @@ class BmsManager extends ChangeNotifier {
     _pollTimer?.cancel();
     _cellTimer?.cancel();
     _rssiTimer?.cancel();
-    _pollTimer = Timer.periodic(const Duration(milliseconds: 1000), (_) {
+    // Fast live polling: 500 ms basic telemetry (JBD clones answer in
+    // ~10–100 ms; sub-200 ms polling mostly adds radio noise and battery
+    // drain without visible value). Cells come on a lighter cadence.
+    _pollTimer = Timer.periodic(const Duration(milliseconds: 500), (_) {
       proto?.poll();
     });
     if (proto is JbdProtocol) {
       final jbd = proto as JbdProtocol;
-      _cellTimer = Timer.periodic(const Duration(seconds: 4), (_) {
+      _cellTimer = Timer.periodic(const Duration(seconds: 2), (_) {
         jbd.send(jbd.pollCells());
       });
     }
@@ -534,8 +537,8 @@ class BmsManager extends ChangeNotifier {
     return DateTime.now().difference(t).inSeconds;
   }
 
-  /// True while telemetry is live: data has arrived and is at most 8s old.
-  bool get dataFresh => dataAgeSeconds >= 0 && dataAgeSeconds <= 8;
+  /// True while telemetry is live: data has arrived and is at most 3s old.
+  bool get dataFresh => dataAgeSeconds >= 0 && dataAgeSeconds <= 3;
 
   DateTime? get lastDataAt => _lastDataAt;
 
@@ -553,7 +556,7 @@ class BmsManager extends ChangeNotifier {
         _intentionalStop = false;
         _device?.disconnect(); // state listener schedules reconnect
       }
-    } else if (age > 8) {
+    } else if (age > 4) {
       status = 'Not receiving data — move closer to scooter';
       notifyListeners();
     }
