@@ -64,7 +64,8 @@ class VoltCard extends StatelessWidget {
     );
 
     return Padding(
-      padding: margin ?? const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+      padding:
+          margin ?? const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
       child: content,
     );
   }
@@ -168,7 +169,8 @@ class VoltEmptyState extends StatelessWidget {
                   accent.withValues(alpha: 0.03),
                 ],
               ),
-              border: Border.all(color: accent.withValues(alpha: 0.35), width: 1.2),
+              border:
+                  Border.all(color: accent.withValues(alpha: 0.35), width: 1.2),
             ),
             child: Icon(icon, size: 30, color: accent),
           ),
@@ -273,7 +275,7 @@ class StatCard extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 6),
-           FittedBox(
+          FittedBox(
             fit: BoxFit.scaleDown,
             alignment: Alignment.centerLeft,
             child: Row(
@@ -282,7 +284,8 @@ class StatCard extends StatelessWidget {
               children: [
                 AnimatedSwitcher(
                   duration: VoltTokens.fast,
-                  transitionBuilder: (child, anim) => FadeTransition(opacity: anim, child: child),
+                  transitionBuilder: (child, anim) =>
+                      FadeTransition(opacity: anim, child: child),
                   child: Text(
                     value,
                     key: ValueKey<String>(value),
@@ -310,7 +313,8 @@ class StatCard extends StatelessWidget {
               subtitle!,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
-              style: VoltType.caption.copyWith(fontSize: 11, color: VoltTokens.textMuted),
+              style: VoltType.caption
+                  .copyWith(fontSize: 11, color: VoltTokens.textMuted),
             ),
         ],
       ),
@@ -460,8 +464,10 @@ class _ElectroArcPainter extends CustomPainter {
       tickPaint.color = isActive
           ? color.withValues(alpha: 0.85)
           : trackColor.withValues(alpha: 0.7);
-      final outer = center + Offset(math.cos(angle), math.sin(angle)) * (radius + 6);
-      final inner = center + Offset(math.cos(angle), math.sin(angle)) * (radius + 2);
+      final outer =
+          center + Offset(math.cos(angle), math.sin(angle)) * (radius + 6);
+      final inner =
+          center + Offset(math.cos(angle), math.sin(angle)) * (radius + 2);
       canvas.drawLine(inner, outer, tickPaint);
     }
 
@@ -497,7 +503,8 @@ class _ElectroArcPainter extends CustomPainter {
 
       // Glowing tip node
       final endAngle = startAngle + sweep;
-      final tip = center + Offset(math.cos(endAngle), math.sin(endAngle)) * (radius - 5);
+      final tip = center +
+          Offset(math.cos(endAngle), math.sin(endAngle)) * (radius - 5);
       canvas.drawCircle(
         tip,
         size.width * 0.042,
@@ -597,11 +604,23 @@ class ConnectionBanner extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final (Color accent, IconData icon, String badge) = switch (state) {
-      BmsState.connected => (VoltTokens.voltMint, Icons.bluetooth_connected, 'LIVE TELEMETRY'),
+      BmsState.connected => (
+          VoltTokens.voltMint,
+          Icons.bluetooth_connected,
+          'LIVE TELEMETRY'
+        ),
       BmsState.connecting => (VoltTokens.voltAmber, Icons.sync, 'HANDSHAKING'),
       BmsState.scanning => (VoltTokens.voltCyan, Icons.radar, 'SCANNING BLE'),
-      BmsState.error => (VoltTokens.voltCoral, Icons.warning_amber_rounded, 'ATTENTION'),
-      BmsState.idle => (VoltTokens.textSecondary, Icons.bluetooth_searching, 'TAP TO PAIR'),
+      BmsState.error => (
+          VoltTokens.voltCoral,
+          Icons.warning_amber_rounded,
+          'ATTENTION'
+        ),
+      BmsState.idle => (
+          VoltTokens.textSecondary,
+          Icons.bluetooth_searching,
+          'TAP TO PAIR'
+        ),
     };
 
     return VoltCard(
@@ -644,12 +663,14 @@ class ConnectionBanner extends StatelessWidget {
                     const SizedBox(width: 6),
                     Text(
                       badge,
-                      style: VoltType.labelMicro.copyWith(color: accent, fontSize: 10.5),
+                      style: VoltType.labelMicro
+                          .copyWith(color: accent, fontSize: 10.5),
                     ),
                     if (protocol != null && protocol!.isNotEmpty) ...[
                       const SizedBox(width: 8),
                       Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1.5),
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 6, vertical: 1.5),
                         decoration: BoxDecoration(
                           color: VoltTokens.bgInteractive,
                           borderRadius: BorderRadius.circular(6),
@@ -695,7 +716,8 @@ class ConnectionBanner extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(width: 2),
-                const Icon(Icons.chevron_right, size: 16, color: VoltTokens.textSecondary),
+                const Icon(Icons.chevron_right,
+                    size: 16, color: VoltTokens.textSecondary),
               ],
             ),
           ),
@@ -714,7 +736,8 @@ class ScanRadar extends StatefulWidget {
   State<ScanRadar> createState() => _ScanRadarState();
 }
 
-class _ScanRadarState extends State<ScanRadar> with SingleTickerProviderStateMixin {
+class _ScanRadarState extends State<ScanRadar>
+    with SingleTickerProviderStateMixin {
   late final AnimationController _controller;
 
   @override
@@ -758,7 +781,8 @@ class _ScanRadarState extends State<ScanRadar> with SingleTickerProviderStateMix
                 decoration: BoxDecoration(
                   shape: BoxShape.circle,
                   color: VoltTokens.bgElevated,
-                  border: Border.all(color: primary.withValues(alpha: 0.5), width: 1.5),
+                  border: Border.all(
+                      color: primary.withValues(alpha: 0.5), width: 1.5),
                   boxShadow: [
                     BoxShadow(
                       color: primary.withValues(alpha: 0.3),
@@ -795,8 +819,10 @@ class _RadarPainter extends CustomPainter {
       ..style = PaintingStyle.stroke
       ..strokeWidth = 1
       ..color = color.withValues(alpha: 0.10);
-    canvas.drawLine(Offset(0, center.dy), Offset(size.width, center.dy), axisPaint);
-    canvas.drawLine(Offset(center.dx, 0), Offset(center.dx, size.height), axisPaint);
+    canvas.drawLine(
+        Offset(0, center.dy), Offset(size.width, center.dy), axisPaint);
+    canvas.drawLine(
+        Offset(center.dx, 0), Offset(center.dx, size.height), axisPaint);
 
     // Static precision rings
     final ring = Paint()

@@ -1,4 +1,3 @@
-import 'dart:ui';
 import 'package:flutter/material.dart';
 
 /// Design tokens, typography, and motion primitives for BMS Rider's
@@ -237,7 +236,8 @@ ThemeData buildVoltTheme() {
       fillColor: VoltTokens.bgElevated,
       isDense: true,
       contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-      labelStyle: const TextStyle(color: VoltTokens.textSecondary, fontSize: 13),
+      labelStyle:
+          const TextStyle(color: VoltTokens.textSecondary, fontSize: 13),
       hintStyle: const TextStyle(color: VoltTokens.textMuted, fontSize: 13),
       enabledBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(VoltTokens.r12),

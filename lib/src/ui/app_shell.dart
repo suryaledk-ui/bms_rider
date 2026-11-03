@@ -51,7 +51,9 @@ class _AppShellState extends State<AppShell> {
                     icon: Icons.bolt_rounded,
                     label: 'Cockpit',
                     badgeText: isConnected && soc != null ? '$soc%' : null,
-                    badgeColor: soc != null ? VoltTokens.socColor(soc) : VoltTokens.voltMint,
+                    badgeColor: soc != null
+                        ? VoltTokens.socColor(soc)
+                        : VoltTokens.voltMint,
                     onTap: () => setState(() => _index = 0),
                   ),
                 ),
@@ -61,7 +63,8 @@ class _AppShellState extends State<AppShell> {
                     selected: _index == 1,
                     icon: Icons.route_rounded,
                     label: 'Trips',
-                    badgeText: app.history.isNotEmpty ? '${app.history.length}' : null,
+                    badgeText:
+                        app.history.isNotEmpty ? '${app.history.length}' : null,
                     badgeColor: VoltTokens.voltCyan,
                     onTap: () => setState(() => _index = 1),
                   ),
@@ -115,9 +118,8 @@ class _NavPill extends StatelessWidget {
           height: 52,
           padding: const EdgeInsets.symmetric(horizontal: 10),
           decoration: BoxDecoration(
-            color: selected
-                ? accent.withValues(alpha: 0.14)
-                : Colors.transparent,
+            color:
+                selected ? accent.withValues(alpha: 0.14) : Colors.transparent,
             borderRadius: BorderRadius.circular(VoltTokens.r16),
             border: Border.all(
               color: selected
@@ -141,7 +143,9 @@ class _NavPill extends StatelessWidget {
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: VoltType.caption.copyWith(
-                    color: selected ? VoltTokens.textPrimary : VoltTokens.textSecondary,
+                    color: selected
+                        ? VoltTokens.textPrimary
+                        : VoltTokens.textSecondary,
                     fontWeight: selected ? FontWeight.w800 : FontWeight.w600,
                     fontSize: 12.5,
                   ),
@@ -150,11 +154,13 @@ class _NavPill extends StatelessWidget {
               if (badgeText != null) ...[
                 const SizedBox(width: 6),
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1.5),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 5, vertical: 1.5),
                   decoration: BoxDecoration(
                     color: badgeColor.withValues(alpha: 0.16),
                     borderRadius: BorderRadius.circular(VoltTokens.rPill),
-                    border: Border.all(color: badgeColor.withValues(alpha: 0.4)),
+                    border:
+                        Border.all(color: badgeColor.withValues(alpha: 0.4)),
                   ),
                   child: Text(
                     badgeText!,
