@@ -143,7 +143,10 @@ class JbdProtocol implements BmsProtocol {
       residualAh: residual,
       nominalAh: nominal,
       cycleCount: cycles,
-      cellVolts: List.filled(nCells, 0), // filled from 0x04 replies
+      // Keep previously parsed cells — the basic frame does not carry them,
+      // and zeroing them here made the UI flash 0.000–0.000V between cell
+      // polls. Cells are refreshed by the 0x04 frames.
+      cellVolts: _last?.cellVolts ?? List.filled(nCells, 0),
       tempsC: temps,
       charging: (op & 0x01) != 0,
       discharging: (op & 0x02) != 0,

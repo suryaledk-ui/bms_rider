@@ -19,6 +19,7 @@ class MainActivity : FlutterActivity() {
     private val channelName = "bmsrider/permissions"
     private val legacyScanChannelName = "bmsrider/legacy_scan"
     private val locationServicesChannelName = "bmsrider/location_services"
+    private val notificationsChannelName = "bmsrider/notify"
     private var pendingResult: MethodChannel.Result? = null
 
     // ---- Legacy BLE scan (BluetoothAdapter.startLeScan) ----
@@ -91,6 +92,10 @@ class MainActivity : FlutterActivity() {
                         // Fine location is still required by many OEM stacks
                         // (LAVA/MediaTek/Samsung) for full beacon visibility.
                         perms.add(Manifest.permission.ACCESS_FINE_LOCATION)
+                        // Notifications (charging / full-charge alerts).
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                            perms.add(Manifest.permission.POST_NOTIFICATIONS)
+                        }
                         requestImpl(perms.distinct(), result)
                     }
                     "requestLocation" -> {
@@ -102,6 +107,19 @@ class MainActivity : FlutterActivity() {
                             Uri.parse("package:$packageName")
                         )
                         startActivity(intent)
+                        result.success(null)
+                    }
+                    else -> result.notImplemented()
+                }
+            }
+
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, notificationsChannelName)
+            .setMethodCallHandler { call, result ->
+                when (call.method) {
+                    "show" -> {
+                        val title = call.argument<String>("title") ?: ""
+                        val body = call.argument<String>("body") ?: ""
+                        showNotification(title, body)
                         result.success(null)
                     }
                     else -> result.notImplemented()
@@ -147,6 +165,40 @@ class MainActivity : FlutterActivity() {
                 android.provider.Settings.Secure.LOCATION_MODE,
                 android.provider.Settings.Secure.LOCATION_MODE_OFF,
             ) != android.provider.Settings.Secure.LOCATION_MODE_OFF
+        }
+    }
+
+    private fun showNotification(title: String, body: String) {
+        try {
+            val nm = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
+            val channelId = "charger_status"
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                val ch = NotificationChannel(
+                    channelId, "Charger status", NotificationManager.IMPORTANCE_HIGH,
+                )
+                nm.createNotificationChannel(ch)
+            }
+            val intent = Intent(this, MainActivity::class.java).apply {
+                flags = Intent.FLAG_ACTIVITY_SINGLE_TOP
+            }
+            val flags = PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            val pi = PendingIntent.getActivity(this, 0, intent, flags)
+            val builder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                Notification.Builder(this, channelId)
+            } else {
+                @Suppress("DEPRECATION")
+                Notification.Builder(this)
+            }
+            builder.setSmallIcon(R.mipmap.ic_launcher)
+                .setContentTitle(title)
+                .setContentText(body)
+                .setAutoCancel(true)
+                .setContentIntent(pi)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                builder.color = getColor(android.R.color.holo_green_dark)
+            }
+            nm.notify(1001, builder.build())
+        } catch (_: Exception) {
         }
     }
 

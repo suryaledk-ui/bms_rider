@@ -485,6 +485,7 @@ class BmsManager extends ChangeNotifier {
 
     _pollTimer?.cancel();
     _cellTimer?.cancel();
+    _rssiTimer?.cancel();
     _pollTimer = Timer.periodic(const Duration(milliseconds: 1000), (_) {
       proto?.poll();
     });
@@ -494,6 +495,16 @@ class BmsManager extends ChangeNotifier {
         jbd.send(jbd.pollCells());
       });
     }
+    // Sample link quality while connected: RSSI is not streamed by the BMS,
+    // so read it on a timer. Exposed as [rssi] for the UI signal chip.
+    _rssiTimer = Timer.periodic(const Duration(seconds: 5), (_) async {
+      if (state != BmsState.connected) return;
+      try {
+        final r = await device.readRssi();
+        _rssi = r;
+        notifyListeners();
+      } catch (_) {}
+    });
 
     // Liveness watchdog: if no telemetry arrives after connect, surface it
     // instead of silently staying "connected". Force a reconnect after 30s
@@ -509,6 +520,11 @@ class BmsManager extends ChangeNotifier {
   DateTime? _lastDataAt;
   bool _dataTimedOut = false;
   Timer? _livenessTimer;
+  Timer? _rssiTimer;
+  int? _rssi;
+
+  /// Current link RSSI in dBm while connected (updated every ~5s).
+  int? get rssi => _rssi;
 
   /// Seconds since the last telemetry frame arrived. -1 when no data has
   /// ever been received for the current session.
@@ -584,6 +600,8 @@ class BmsManager extends ChangeNotifier {
     _cellTimer?.cancel();
     _retryTimer?.cancel();
     _livenessTimer?.cancel();
+    _rssiTimer?.cancel();
+    _rssi = null;
     await _device?.disconnect();
     proto?.dispose();
     proto = null;
@@ -599,6 +617,8 @@ class BmsManager extends ChangeNotifier {
     _cellTimer?.cancel();
     _retryTimer?.cancel();
     _livenessTimer?.cancel();
+    _rssiTimer?.cancel();
+    _rssi = null;
     _telemetry.close();
     super.dispose();
   }

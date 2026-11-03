@@ -294,6 +294,10 @@ class _HomePageState extends State<HomePage> {
                           ),
                         ),
                       ],
+                      const SizedBox(height: 8),
+                      Center(
+                        child: _signalChip(bms.rssi),
+                      ),
                     ],
                   ),
                 ),
@@ -312,6 +316,10 @@ class _HomePageState extends State<HomePage> {
           ],
         ),
       ),
+      if (app.isCharging) ...[
+        const SizedBox(height: 10),
+        _chargingCard(app),
+      ],
       const SizedBox(height: 10),
 
       // ---- Live electrical readings ----
@@ -450,6 +458,82 @@ class _HomePageState extends State<HomePage> {
         _diagnosticCard(context, app.lastDiagnostic!),
       ],
     ];
+  }
+
+  // ---------------------------------------------------------------------
+  // Signal chip & charging card
+  // ---------------------------------------------------------------------
+
+  Widget _signalChip(int? rssi) {
+    if (rssi == null) return const SizedBox.shrink();
+    final color = rssi >= -60
+        ? VoltTokens.voltMint
+        : rssi >= -75
+            ? VoltTokens.voltAmber
+            : VoltTokens.voltCoral;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.10),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: color.withValues(alpha: 0.35)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Icons.signal_cellular_alt_rounded, size: 15, color: color),
+          const SizedBox(width: 5),
+          Text(
+            '$rssi dBm',
+            style: VoltType.caption.copyWith(
+              color: color,
+              fontSize: 11.5,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _chargingCard(AppController app) {
+    final t = app.bms.latest;
+    final eta = app.chargeEtaMinutes;
+    final etaLabel = eta == null
+        ? 'measuring rate…'
+        : eta >= 60
+            ? '~${(eta / 60).floor()}h ${eta % 60}m to full'
+            : '~$eta min to full';
+
+    return VoltCard(
+      accentColor: VoltTokens.voltMint,
+      margin: const EdgeInsets.fromLTRB(16, 0, 16, 0),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+      child: Row(
+        children: [
+          const _ChargingBolt(),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('Charging', style: VoltType.bodyStrong),
+                const SizedBox(height: 2),
+                Text(
+                  t == null ? etaLabel : '${t.socPercent}% · $etaLabel',
+                  style: VoltType.caption.copyWith(color: VoltTokens.textSecondary),
+                ),
+              ],
+            ),
+          ),
+          if (t != null)
+            Text(
+              '${t.socPercent}%',
+              style: VoltType.metricValue.copyWith(color: VoltTokens.voltMint),
+            ),
+        ],
+      ),
+    );
   }
 
   // ---------------------------------------------------------------------
@@ -715,6 +799,14 @@ class _HomePageState extends State<HomePage> {
       child: Column(
         children: [
           for (final r in rows) _rangeRow(r, maxKm),
+          const SizedBox(height: 4),
+          Text(
+            'Estimate from pack energy + your riding style — refines automatically as you ride.',
+            style: VoltType.caption.copyWith(
+              fontSize: 11,
+              color: VoltTokens.textSecondary,
+            ),
+          ),
         ],
       ),
     );
@@ -1175,6 +1267,54 @@ class _BrandTitle extends StatelessWidget {
         const SizedBox(width: 10),
         const Text('BMS Rider'),
       ],
+    );
+  }
+}
+
+/// Pulsing bolt used in the charging status card.
+class _ChargingBolt extends StatefulWidget {
+  const _ChargingBolt();
+
+  @override
+  State<_ChargingBolt> createState() => _ChargingBoltState();
+}
+
+class _ChargingBoltState extends State<_ChargingBolt>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 900),
+    )..repeat(reverse: true);
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 42,
+      height: 42,
+      decoration: BoxDecoration(
+        color: VoltTokens.voltMint.withValues(alpha: 0.14),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: FadeTransition(
+        opacity: Tween<double>(begin: 0.35, end: 1.0).animate(_controller),
+        child: const Icon(
+          Icons.bolt_rounded,
+          color: VoltTokens.voltMint,
+          size: 26,
+        ),
+      ),
     );
   }
 }

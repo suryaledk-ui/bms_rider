@@ -51,6 +51,10 @@ class _HealthPageState extends State<HealthPage> {
               children: [
                 const SizedBox(height: 8),
                 _SohCard(app: app, t: t),
+                if (app.estimatedCapacityWh != null) ...[
+                  const SizedBox(height: 10),
+                  _AutoCapacityCard(app: app),
+                ],
                 const SizedBox(height: 10),
                 const VoltSectionHeader(
                   eyebrow: 'Cell balance',
@@ -134,34 +138,49 @@ class _SohCard extends StatelessWidget {
                     ),
                     const SizedBox(height: 12),
                     _kvRow(
+                      context,
                       Icons.cyclone_rounded,
                       'Cycles',
                       '${health.cycles}',
                       VoltTokens.voltCyan,
+                      help: 'A cycle = one full charge + discharge of the pack. '
+                          '473 is typical for a used scooter pack. Li-ion packs '
+                          'hold ~80% capacity at 900–1400 cycles.',
                     ),
                     const SizedBox(height: 8),
                     _kvRow(
+                      context,
                       Icons.tune_rounded,
                       'Cell spread',
                       '${health.cellSpreadMv.toStringAsFixed(0)} mV',
                       VoltTokens.voltAmber,
+                      help: 'Difference between the highest and lowest cell '
+                          'voltage. Under ~30 mV is healthy; larger gaps mean '
+                          'the pack needs balancing.',
                     ),
                     const SizedBox(height: 8),
                     _kvRow(
+                      context,
                       Icons.thermostat_rounded,
                       'Thermal sag',
                       '${health.sagDropV.toStringAsFixed(1)} V @ load',
                       VoltTokens.voltCoral,
+                      help: 'How much pack voltage sags under load. Higher sag '
+                          '= higher internal resistance, weak or hot cells.',
                     ),
                     const SizedBox(height: 8),
                     _kvRow(
+                      context,
                       Icons.device_thermostat_rounded,
                       'Pack temp',
                       _tempLabel(),
                       VoltTokens.voltMint,
+                      help: 'Temperatures reported by sensors inside the pack '
+                          '(°C). Keep under ~50°C when riding or charging.',
                     ),
                     const SizedBox(height: 8),
                     _kvRow(
+                      context,
                       Icons.memory_rounded,
                       'Protocol',
                       t.protocol,
@@ -177,7 +196,8 @@ class _SohCard extends StatelessWidget {
     );
   }
 
-  Widget _kvRow(IconData icon, String label, String value, Color color) {
+  Widget _kvRow(BuildContext context, IconData icon, String label, String value,
+      Color color, {String? help}) {
     return Row(
       children: [
         Container(
@@ -191,9 +211,26 @@ class _SohCard extends StatelessWidget {
         ),
         const SizedBox(width: 8),
         Expanded(
-          child: Text(
-            label,
-            style: VoltType.caption.copyWith(fontSize: 11.5),
+          child: Row(
+            children: [
+              Flexible(
+                child: Text(
+                  label,
+                  style: VoltType.caption.copyWith(fontSize: 11.5),
+                ),
+              ),
+              if (help != null) ...[
+                const SizedBox(width: 3),
+                GestureDetector(
+                  onTap: () => _showHelp(context, label, help),
+                  child: Icon(
+                    Icons.help_outline_rounded,
+                    size: 13,
+                    color: VoltTokens.textSecondary,
+                  ),
+                ),
+              ],
+            ],
           ),
         ),
         Flexible(
@@ -209,6 +246,23 @@ class _SohCard extends StatelessWidget {
           ),
         ),
       ],
+    );
+  }
+
+  void _showHelp(BuildContext context, String title, String text) {
+    showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: VoltTokens.bgElevated,
+        title: Text(title, style: VoltType.bodyStrong),
+        content: Text(text, style: VoltType.body),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('Got it'),
+          ),
+        ],
+      ),
     );
   }
 
@@ -432,6 +486,66 @@ class _CalibrateCard extends StatelessWidget {
               ),
             ),
           ],
+        ],
+      ),
+    );
+  }
+}
+
+/// Shows the auto-estimated usable capacity (coulomb counting) when the app
+/// has gathered enough real discharge data.
+class _AutoCapacityCard extends StatelessWidget {
+  final AppController app;
+  const _AutoCapacityCard({required this.app});
+
+  @override
+  Widget build(BuildContext context) {
+    final est = app.estimatedCapacityWh;
+    final at = app.capacityEstimatedAt;
+    final when = at == null
+        ? ''
+        : ' · measured ${at.hour.toString().padLeft(2, '0')}:'
+            '${at.minute.toString().padLeft(2, '0')}';
+    return VoltCard(
+      accentColor: VoltTokens.voltMint,
+      margin: const EdgeInsets.fromLTRB(16, 0, 16, 0),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+      child: Row(
+        children: [
+          Container(
+            width: 40,
+            height: 40,
+            decoration: BoxDecoration(
+              color: VoltTokens.voltMint.withValues(alpha: 0.14),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: const Icon(
+              Icons.auto_graph_rounded,
+              color: VoltTokens.voltMint,
+              size: 22,
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('Auto-estimated capacity', style: VoltType.bodyStrong),
+                const SizedBox(height: 2),
+                Text(
+                  est == null
+                      ? 'collecting ride data…'
+                      : '~${est.toStringAsFixed(0)} Wh usable$when',
+                  style: VoltType.caption.copyWith(color: VoltTokens.textSecondary),
+                ),
+              ],
+            ),
+          ),
+          if (est != null)
+            Text(
+              '${est.toStringAsFixed(0)} Wh',
+              style: VoltType.bodyStrong.copyWith(color: VoltTokens.voltMint),
+            ),
         ],
       ),
     );

@@ -8,6 +8,7 @@ import 'package:wakelock_plus/wakelock_plus.dart';
 import 'bms_manager.dart';
 import 'models.dart';
 import 'native_permissions.dart';
+import 'native_notifications.dart';
 import 'range.dart';
 import 'scan_log.dart';
 import 'store.dart';
@@ -98,6 +99,41 @@ class AppController extends ChangeNotifier {
 
   bool _autoWhDone = false;
 
+  // ---- charging state + phone notifications ----
+  bool _wasCharging = false;
+  bool _fullChargeNotified = false;
+  double? _chargeEnergyWs; // energy poured while charging (current < 0)
+  DateTime? _chargeStartedAt;
+
+  /// True when the BMS reports it is charging right now.
+  bool get isCharging => _wasCharging;
+
+  /// Estimated minutes remaining to full charge, when charging.
+  int? get chargeEtaMinutes {
+    if (!_wasCharging || _chargeEnergyWs == null || _chargeStartedAt == null) {
+      return null;
+    }
+    final elapsedMin = DateTime.now().difference(_chargeStartedAt!).inSeconds / 60.0;
+    if (elapsedMin < 1.5) return null;
+    final avgRateWhPerMin =
+        (_chargeEnergyWs! / 3600.0) / elapsedMin;
+    if (avgRateWhPerMin <= 0) return null;
+    final soc = bms.latest?.socPercent;
+    if (soc == null) return null;
+    final missingWh = store.usableWh * (100 - soc) / 100.0;
+    return (missingWh / avgRateWhPerMin).ceil();
+  }
+
+  // ---- automatic true-capacity estimation (coulomb count) ----
+  double? _socAnchor;
+  double? _dischargeEnergyWs;
+  double? _estimatedCapacityWh;
+  DateTime? _capacityEstimatedAt;
+
+  /// Auto-estimated usable capacity (Wh) from measured discharge, nullable.
+  double? get estimatedCapacityWh => _estimatedCapacityWh;
+  DateTime? get capacityEstimatedAt => _capacityEstimatedAt;
+
   /// BMS reports nominal Ah + cell count — derive usable Wh automatically
   /// (unless the user set it manually): nominal Ah × cells × 3.70 V × 0.92.
   void _onTelemetry(Telemetry t) {
@@ -117,6 +153,64 @@ class AppController extends ChangeNotifier {
             '(nom ${t.nominalAh.toStringAsFixed(2)}Ah × ${t.cellVolts.length} cells)');
         notifyListeners();
       }
+    }
+
+    // Charging lifecycle + notifications.
+    final charging = t.charging || t.currentA < -0.2;
+    if (charging) {
+      if (!_wasCharging) {
+        _wasCharging = true;
+        _fullChargeNotified = false;
+        _chargeEnergyWs = 0;
+        _chargeStartedAt = DateTime.now();
+      } else {
+        // integrate charger power (current negative = into battery)
+        _chargeEnergyWs = (_chargeEnergyWs ?? 0) + (t.powerW.abs() * 2.0);
+      }
+      if (t.socPercent >= 99 && !_fullChargeNotified) {
+        _fullChargeNotified = true;
+        _maybeNotify(
+          'Battery full',
+          'Your scooter is fully charged (${t.socPercent}%). Unplug when convenient.',
+        );
+      }
+    } else if (_wasCharging) {
+      _wasCharging = false;
+      _chargeEnergyWs = null;
+      _chargeStartedAt = null;
+    }
+
+    // Coulomb-count auto capacity: track WH drawn while discharging and the
+    // SOC delta across that window; when ΔSOC ≥ 10% we can estimate usable
+    // capacity = energyUsed / (ΔSOC/100).
+    if (t.currentA > 0.2) {
+      _dischargeEnergyWs = (_dischargeEnergyWs ?? 0) + (t.powerW * 2.0);
+      _socAnchor ??= t.socPercent.toDouble();
+      final delta = _socAnchor! - t.socPercent;
+      final used = (_dischargeEnergyWs! / 3600.0);
+      if (delta >= 10 && used > 15) {
+        final est = used / (delta / 100.0);
+        if (est > 200 && est < 8000) {
+          final improved = _estimatedCapacityWh == null ||
+              (est - _estimatedCapacityWh!).abs() / _estimatedCapacityWh! > 0.05;
+          if (improved) {
+            _estimatedCapacityWh = est;
+            _capacityEstimatedAt = DateTime.now();
+            store.setCalibratedSoH(
+              ((est / (store.usableWh == 0 ? 1 : store.usableWh) * 100)
+                      .clamp(20, 120))
+                  .toDouble(),
+            );
+            scanLog.log('BMS', 'auto capacity estimate ≈${est.toStringAsFixed(0)}Wh '
+                '(ΔSOC $delta%, ${used.toStringAsFixed(1)}Wh used)');
+          }
+        }
+        _socAnchor = t.socPercent.toDouble();
+        _dischargeEnergyWs = 0;
+      }
+    } else {
+      _socAnchor = t.socPercent.toDouble();
+      _dischargeEnergyWs = 0;
     }
   }
 
@@ -154,6 +248,11 @@ class AppController extends ChangeNotifier {
 
   Future<void> requestPermissionsAndScan() async {
     await bms.scan();
+  }
+
+  void _maybeNotify(String title, String body) {
+    NativeNotifications.show(title, body);
+    scanLog.log('NOTIFY', '$title — $body');
   }
 
   double get currentSpeedKmh => gpsSpeedKmh;
