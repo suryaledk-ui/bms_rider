@@ -6,6 +6,7 @@ import 'package:geolocator/geolocator.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
 
 import 'bms_manager.dart';
+import 'gps_settings.dart';
 import 'ml_range.dart';
 import 'models.dart';
 import 'native_permissions.dart';
@@ -123,6 +124,19 @@ class AppController extends ChangeNotifier {
   bool _weatherFetched = false;
   double gpsSpeedKmh = 0;
   double gpsHeadingDeg = 0;
+
+  /// Non-null when ride GPS is unavailable/errored; surfaced in the ride UI
+  /// so a dead stream is never silently shown as 0 speed / 0 distance.
+  String? rideGpsError;
+  int _gpsLogCount = 0;
+
+  /// Diagnostic logger for GPS lifecycle, capped to the first 20 lines per
+  /// app session so a repeating error cannot spam the scan log.
+  void _gpsLog(String message) {
+    if (_gpsLogCount >= 20) return;
+    _gpsLogCount++;
+    scanLog.log('GPS', message);
+  }
 
   AppController() {
     bms.attachStorage(
@@ -405,74 +419,141 @@ class AppController extends ChangeNotifier {
     if (t == null) return;
 
     // Location is only needed for ride tracking (GPS), not for BLE.
+    // Pre-flight: also verify with geolocator's own permission/location-
+    // service checks (not just our native channel) and log every outcome so
+    // a dead GPS stream can never happen silently.
     final locOk = await NativePermissions.requestLocation();
-    if (!locOk) {
-      return; // user denied location; ride will not start
+    _gpsLog('permission request -> ${locOk ? 'granted' : 'denied'}');
+
+    LocationPermission perm;
+    try {
+      perm = await Geolocator.checkPermission();
+    } catch (e) {
+      perm = LocationPermission.denied;
+      _gpsLog('checkPermission threw: $e');
+    }
+    _gpsLog('geolocator checkPermission -> $perm');
+    if (perm == LocationPermission.denied ||
+        perm == LocationPermission.deniedForever) {
+      rideGpsError =
+          'Location permission denied — enable location access in system '
+          'settings to track rides.';
+      _gpsLog(rideGpsError!);
+      notifyListeners();
+      return;
     }
 
-    ride = ActiveRide()..socStart = t.socPercent;
-    _speedFilter.reset();
-    lastDiagnostic = null;
-    await WakelockPlus.enable();
+    bool serviceEnabled;
+    try {
+      serviceEnabled = await Geolocator.isLocationServiceEnabled();
+    } catch (e) {
+      serviceEnabled = false;
+      _gpsLog('isLocationServiceEnabled threw: $e');
+    }
+    _gpsLog('location service enabled -> $serviceEnabled');
+    if (!serviceEnabled) {
+      rideGpsError =
+          'Device location service is OFF — turn it on to track rides.';
+      _gpsLog(rideGpsError!);
+      notifyListeners();
+      return;
+    }
 
     // Android explicitly tuned: high accuracy, min 2 m movement, 500 ms
     // interval (hardware-dependent). geolocator 14 has no nested
     // `androidSettings` on LocationSettings — you pass an AndroidSettings
     // instance directly as locationSettings, which the Android plugin reads
     // via toJson() (includes accuracy/distanceFilter/timeLimit + interval).
-    _gpsSub = Geolocator.getPositionStream(
-      locationSettings: AndroidSettings(
-        accuracy: LocationAccuracy.high,
-        distanceFilter: 2,
-        timeLimit: null,
-        intervalDuration: const Duration(milliseconds: 500),
-      ),
-    ).listen((pos) {
-      final r = ride;
-      if (r == null) return;
-      if (r.hasFix) {
-        final d = _haversine(r.lastLat, r.lastLng, pos.latitude, pos.longitude);
-        r.distanceM += d;
-      }
-      r.lastLat = pos.latitude;
-      r.lastLng = pos.longitude;
-      r.hasFix = true;
-      gpsSpeedKmh = pos.speed * 3.6;
-      gpsHeadingDeg = pos.heading;
-      // Dead-zone + hysteresis filter kills ghost speed while parked while
-      // preserving the EMA smoothing for real motion (see SpeedFilter).
-      final speed = _speedFilter.update(gpsSpeedKmh);
-      if (speed > r.maxSpeed) r.maxSpeed = speed;
-
-      // Fetch ambient weather once per ride (temp/wind for range accuracy).
-      if (!_weatherFetched) {
-        _weatherFetched = true;
-        fetchWeather(pos.latitude, pos.longitude).then((w) {
-          if (w != null) {
-            weather = w;
-            notifyListeners();
-          }
-        });
-      }
-
-      // Stop detection with hysteresis: only count a stop after ~2s (4
-      // reports at 500ms) of sustained low speed — a single jitter dip
-      // must not count as a stop.
-      final moving = speed > 1.5;
-      if (moving) {
-        r.lowSpeedStreak = 0;
-        r.wasMoving = true;
-      } else {
-        r.lowSpeedStreak++;
-        if (r.lowSpeedStreak >= 4 && r.wasMoving) {
-          r.stops++;
-          r.wasMoving = false;
-        }
-      }
+    // Subscribe BEFORE marking the ride active: if stream setup throws, we
+    // abort cleanly instead of leaving a live ride with no GPS data (which
+    // previously showed eternal 0 km/h / 0 km). The settings are built by
+    // [buildRideLocationSettings] — geolocator 14 API, no nested
+    // `androidSettings` key, no `accuracyPriority`.
+    try {
+      _gpsSub = Geolocator.getPositionStream(
+        locationSettings: buildRideLocationSettings(),
+      ).listen(_onGpsPosition, onError: _onGpsError);
+      _gpsLog('subscription started (AndroidSettings high/2m/500ms)');
+    } catch (e) {
+      rideGpsError = 'GPS stream failed to start: $e';
+      _gpsLog(rideGpsError!);
       notifyListeners();
-    }, onError: (_) {});
+      return;
+    }
+
+    ride = ActiveRide()..socStart = t.socPercent;
+    _speedFilter.reset();
+    lastDiagnostic = null;
+
+    // Wakelock is convenience-only; a failure here must never kill GPS.
+    try {
+      await WakelockPlus.enable();
+    } catch (e) {
+      _gpsLog('wakelock enable failed (non-fatal): $e');
+    }
 
     _rideTimer = Timer.periodic(const Duration(seconds: 1), (_) => _rideTick());
+  }
+
+  /// Stream handler for GPS positions: integrates distance (haversine) and
+  /// runs the speed filter on every event, independent of filter state.
+  void _onGpsPosition(Position pos) {
+    final r = ride;
+    if (r == null) return;
+    if (!r.hasFix) {
+      _gpsLog('first fix lat=${pos.latitude.toStringAsFixed(5)} '
+          'lng=${pos.longitude.toStringAsFixed(5)} '
+          'speed=${pos.speed.toStringAsFixed(2)} m/s');
+    }
+    if (r.hasFix) {
+      final d = _haversine(r.lastLat, r.lastLng, pos.latitude, pos.longitude);
+      r.distanceM += d;
+    }
+    r.lastLat = pos.latitude;
+    r.lastLng = pos.longitude;
+    r.hasFix = true;
+    gpsSpeedKmh = pos.speed * 3.6;
+    gpsHeadingDeg = pos.heading;
+    // Dead-zone + hysteresis filter kills ghost speed while parked while
+    // preserving the EMA smoothing for real motion (see SpeedFilter).
+    final speed = _speedFilter.update(gpsSpeedKmh);
+    if (speed > r.maxSpeed) r.maxSpeed = speed;
+
+    // Fetch ambient weather once per ride (temp/wind for range accuracy).
+    if (!_weatherFetched) {
+      _weatherFetched = true;
+      fetchWeather(pos.latitude, pos.longitude).then((w) {
+        if (w != null) {
+          weather = w;
+          notifyListeners();
+        }
+      });
+    }
+
+    // Stop detection with hysteresis: only count a stop after ~2s (4
+    // reports at 500ms) of sustained low speed — a single jitter dip
+    // must not count as a stop.
+    final moving = speed > 1.5;
+    if (moving) {
+      r.lowSpeedStreak = 0;
+      r.wasMoving = true;
+    } else {
+      r.lowSpeedStreak++;
+      if (r.lowSpeedStreak >= 4 && r.wasMoving) {
+        r.stops++;
+        r.wasMoving = false;
+      }
+    }
+    notifyListeners();
+  }
+
+  /// Never swallow GPS stream errors silently: log them and surface them in
+  /// the ride UI (an errored position stream delivers no further events, so
+  /// the user must see why speed/distance are stuck at 0).
+  void _onGpsError(Object error, [StackTrace? stackTrace]) {
+    _gpsLog('stream error: $error');
+    rideGpsError = 'GPS error: $error';
+    notifyListeners();
   }
 
   void _rideTick() {
@@ -635,6 +716,8 @@ class AppController extends ChangeNotifier {
     ride = null;
     gpsSpeedKmh = 0;
     _speedFilter.reset();
+    rideGpsError = null;
+    _gpsLogCount = 0;
     notifyListeners();
   }
 

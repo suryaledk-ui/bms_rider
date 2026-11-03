@@ -44,7 +44,7 @@ class _RidePageState extends State<RidePage> {
               icon: Icons.stop_circle_outlined,
               eyebrow: 'Session ended',
               title: 'Ride ended',
-              message: 'Your trip was saved to Trips.',
+              message: app.rideGpsError ?? 'Your trip was saved to Trips.',
               accent: VoltTokens.voltMint,
             ),
           ),
@@ -153,6 +153,32 @@ class _RidePageState extends State<RidePage> {
                 ),
               ],
             ),
+            if (app.rideGpsError != null) ...[
+              const SizedBox(height: 10),
+              VoltCard(
+                accentColor: VoltTokens.voltCoral,
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 14,
+                  vertical: 12,
+                ),
+                child: Row(
+                  children: [
+                    const Icon(
+                      Icons.gps_off_rounded,
+                      size: 20,
+                      color: VoltTokens.voltCoral,
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Text(
+                        app.rideGpsError!,
+                        style: VoltType.body.copyWith(fontSize: 12.5),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
             if (t != null) ...[
               const SizedBox(height: 14),
               VoltCard(
