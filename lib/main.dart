@@ -1,11 +1,21 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 
 import 'src/controller.dart';
 import 'src/ui/app_shell.dart';
+import 'src/ui/theme.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  SystemChrome.setSystemUIOverlayStyle(
+    const SystemUiOverlayStyle(
+      statusBarColor: Colors.transparent,
+      statusBarIconBrightness: Brightness.light,
+      systemNavigationBarColor: VoltTokens.bgCanvas,
+      systemNavigationBarIconBrightness: Brightness.light,
+    ),
+  );
   final controller = AppController();
   await controller.init();
   runApp(
@@ -24,19 +34,7 @@ class BmsRiderApp extends StatelessWidget {
     return MaterialApp(
       title: 'BMS Rider',
       debugShowCheckedModeBanner: false,
-      theme: ThemeData(
-        useMaterial3: true,
-        brightness: Brightness.dark,
-        colorScheme: ColorScheme.fromSeed(
-          seedColor: const Color(0xFF00E5A0),
-          brightness: Brightness.dark,
-        ),
-        scaffoldBackgroundColor: const Color(0xFF0B0F14),
-        cardTheme: const CardThemeData(
-          color: Color(0xFF141A22),
-          margin: EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-        ),
-      ),
+      theme: buildVoltTheme(),
       home: const AppShell(),
     );
   }
