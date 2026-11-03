@@ -46,3 +46,7 @@ app.*.map.json
 
 # Widget Preview related
 .widget_preview/
+
+# Local reverse-engineering artifacts (decompiled APK dumps)
+/re_bat/
+/scripts/phone_logcat.txt

@@ -5,6 +5,7 @@ import '../bms_manager.dart';
 import '../controller.dart';
 import '../range.dart';
 import 'log_page.dart';
+import 'profile_page.dart';
 import 'ride_page.dart';
 import 'widgets.dart';
 
@@ -27,6 +28,13 @@ class _HomePageState extends State<HomePage> {
       appBar: AppBar(
         title: const Text('BMS Rider'),
         actions: [
+          IconButton(
+            icon: const Icon(Icons.person_outline),
+            tooltip: 'Profile & settings',
+            onPressed: () => Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => const ProfilePage()),
+            ),
+          ),
           IconButton(
             icon: const Icon(Icons.terminal),
             tooltip: 'Scan logs',
@@ -102,6 +110,63 @@ class _HomePageState extends State<HomePage> {
                   ),
                 ),
               ),
+            if (app.lastDiagnostic != null && app.lastDiagnostic!.lessRange)
+              _tyreNudgeCard(context, app),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _tyreNudgeCard(BuildContext context, AppController app) {
+    final scheme = Theme.of(context).colorScheme;
+    final lastCheck = app.store.tirePressureCheckedAt;
+    final overdue = lastCheck == null ||
+        DateTime.now().difference(lastCheck).inDays > 30;
+
+    if (!overdue) return const SizedBox.shrink();
+
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(Icons.speed, color: const Color(0xFFFFB300)),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    'Tyre pressure may be low',
+                    style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 15),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 6),
+            Text(
+              'Less range was detected and tyre pressure hasn\'t been checked '
+              '${lastCheck == null ? 'yet' : 'in 30+ days'}. A quick check can '
+              'restore range.',
+              style: TextStyle(fontSize: 13, color: scheme.onSurfaceVariant),
+            ),
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                FilledButton.tonal(
+                  onPressed: () => app.updateProfile(tirePressurePsi: app.store.tirePressurePsi),
+                  child: const Text('Checked now'),
+                ),
+                const SizedBox(width: 8),
+                TextButton(
+                  onPressed: () => Navigator.of(context).push(
+                    MaterialPageRoute(builder: (_) => const ProfilePage()),
+                  ),
+                  child: const Text('Set pressure'),
+                ),
+              ],
+            ),
           ],
         ),
       ),
@@ -161,6 +226,16 @@ class _HomePageState extends State<HomePage> {
           speed: '${speed.toStringAsFixed(0)} km/h',
         ),
       ),
+      if (app.weather != null)
+        Padding(
+          padding: const EdgeInsets.only(top: 4),
+          child: Center(
+            child: Text(
+              '${app.weather!.tempC.toStringAsFixed(0)}°C · wind ${app.weather!.windSpeedKmh.toStringAsFixed(0)} km/h',
+              style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
+            ),
+          ),
+        ),
       const SizedBox(height: 8),
       Row(
         mainAxisAlignment: MainAxisAlignment.center,

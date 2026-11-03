@@ -1,6 +1,7 @@
 import 'dart:math' as math;
 
 import 'models.dart';
+import 'weather.dart';
 
 enum RideMode { eco, sports, hyper }
 
@@ -17,28 +18,157 @@ RideMode modeForSpeed(double kmh) {
   return RideMode.hyper;
 }
 
+/// Predefined vehicle profiles for the app's target segment (generic Chinese
+/// packs + Komaki class). Selecting one seeds the physics priors (mass,
+/// usable Wh, drag) so estimates are accurate from the first ride.
+class VehiclePreset {
+  final String id;
+  final String name;
+  final String subtitle;
+  final double scooterKg;
+  final double usableWh;
+  final double cdA;
+  final double crr;
+  final double ratedPhi;
+  final double topSpeedKmh;
+  final String packLabel;
+
+  const VehiclePreset({
+    required this.id,
+    required this.name,
+    required this.subtitle,
+    required this.scooterKg,
+    required this.usableWh,
+    required this.cdA,
+    required this.crr,
+    required this.ratedPhi,
+    required this.topSpeedKmh,
+    required this.packLabel,
+  });
+}
+
+const List<VehiclePreset> vehiclePresets = [
+  VehiclePreset(
+    id: 'generic_48v20ah',
+    name: 'Generic 48V 20Ah',
+    subtitle: '800W hub · ~0.96 kWh · ≤35 km/h',
+    scooterKg: 80,
+    usableWh: 880,
+    cdA: 0.58,
+    crr: 0.018,
+    ratedPhi: 32,
+    topSpeedKmh: 35,
+    packLabel: '48V 20Ah',
+  ),
+  VehiclePreset(
+    id: 'generic_60v20ah',
+    name: 'Generic 60V 20Ah',
+    subtitle: '800–1000W hub · ~1.20 kWh · ≤45 km/h',
+    scooterKg: 85,
+    usableWh: 1100,
+    cdA: 0.58,
+    crr: 0.018,
+    ratedPhi: 32,
+    topSpeedKmh: 45,
+    packLabel: '60V 20Ah',
+  ),
+  VehiclePreset(
+    id: 'generic_60v30ah',
+    name: 'Generic 60V 30Ah',
+    subtitle: '1000–1200W hub · ~1.80 kWh · ≤50 km/h',
+    scooterKg: 95,
+    usableWh: 1660,
+    cdA: 0.60,
+    crr: 0.018,
+    ratedPhi: 32,
+    topSpeedKmh: 50,
+    packLabel: '60V 30Ah',
+  ),
+  VehiclePreset(
+    id: 'generic_72v30ah',
+    name: 'Generic 72V 30Ah',
+    subtitle: '1200–1500W hub · ~2.16 kWh · ≤55 km/h',
+    scooterKg: 100,
+    usableWh: 1990,
+    cdA: 0.60,
+    crr: 0.018,
+    ratedPhi: 32,
+    topSpeedKmh: 55,
+    packLabel: '72V 30Ah',
+  ),
+  VehiclePreset(
+    id: 'komaki_se_eco',
+    name: 'Komaki SE (Eco)',
+    subtitle: '62V 35Ah · ~2.17 kWh · 3kW hub · ≤60 km/h',
+    scooterKg: 100,
+    usableWh: 2000,
+    cdA: 0.65,
+    crr: 0.016,
+    ratedPhi: 32,
+    topSpeedKmh: 60,
+    packLabel: '62V 35Ah',
+  ),
+  VehiclePreset(
+    id: 'komaki_se_sport',
+    name: 'Komaki SE (Sport)',
+    subtitle: '74V 44Ah · ~3.26 kWh · 3kW/5.2kW · ≤80 km/h',
+    scooterKg: 100,
+    usableWh: 3000,
+    cdA: 0.65,
+    crr: 0.016,
+    ratedPhi: 32,
+    topSpeedKmh: 80,
+    packLabel: '74V 44Ah',
+  ),
+  VehiclePreset(
+    id: 'komaki_xgt_km',
+    name: 'Komaki XGT KM',
+    subtitle: '60V 34Ah · ~2.04 kWh · licence-free ≤25 km/h',
+    scooterKg: 90,
+    usableWh: 1880,
+    cdA: 0.60,
+    crr: 0.018,
+    ratedPhi: 32,
+    topSpeedKmh: 25,
+    packLabel: '60V 34Ah',
+  ),
+  VehiclePreset(
+    id: 'komaki_xone',
+    name: 'Komaki X-One (1.75–2.2 kWh)',
+    subtitle: 'LiFePO4 · 2kW hub · ≤50–60 km/h',
+    scooterKg: 85,
+    usableWh: 1840,
+    cdA: 0.60,
+    crr: 0.017,
+    ratedPhi: 32,
+    topSpeedKmh: 55,
+    packLabel: 'LiFePO4 1.75–2.2 kWh',
+  ),
+];
+
 /// Coulomb/physics consumption model for the Chinese scooter class.
 ///
 /// EC_battery [Wh/km] = (0.5·ρ·CdA·v² + Crr·m·g + m·g·sinθ + m·a) / (3.6·η)
 ///                    + P_aux / v   (v in m/s inside the bracket; km/h outside)
 class RangeEstimator {
   static const double kRho = 1.225; // kg/m3
-  static const double kCdA = 0.48; // m2
-  static const double kCrr = 0.018;
   static const double kG = 9.81;
   static const double kPaux = 3.0; // W
-  static const double kEtaEco = 0.74;
-  static const double kEtaSports = 0.78;
-  static const double kEtaHyper = 0.80;
 
-  double massKg; // total scooter + rider
+  final double cdA;
+  final double crrBase;
+  final double massKg; // total scooter + rider
 
-  RangeEstimator({required this.massKg});
+  RangeEstimator({
+    required this.massKg,
+    this.cdA = 0.48,
+    this.crrBase = 0.018,
+  });
 
   double _eta(RideMode m) => switch (m) {
-        RideMode.eco => kEtaEco,
-        RideMode.sports => kEtaSports,
-        RideMode.hyper => kEtaHyper,
+        RideMode.eco => 0.74,
+        RideMode.sports => 0.78,
+        RideMode.hyper => 0.80,
       };
 
   /// Reference speeds used for per-mode range cards.
@@ -48,25 +178,46 @@ class RangeEstimator {
         RideMode.hyper => 47,
       };
 
+  /// Rolling resistance correction from tyre pressure (psi).
+  /// Research: ~3% range lost per 1 psi below spec; Crr ∝ P^-0.5.
+  double crrAtPressure(double psi, {double ratedPsi = 32}) {
+    if (psi <= 0) return crrBase;
+    final ratio = psi / ratedPsi;
+    return crrBase * math.pow(ratio, -0.5).toDouble();
+  }
+
   /// Predicted battery consumption (Wh/km) at steady speed.
-  double whPerKmAt(double kmh, RideMode mode) {
+  double whPerKmAt(
+    double kmh,
+    RideMode mode, {
+    double? tirePsi,
+    double? headwindKmh,
+  }) {
     final v = kmh / 3.6; // m/s
-    final fRoll = kCrr * massKg * kG;
-    final fAero = 0.5 * kRho * kCdA * v * v;
+    final crr = crrAtPressure(tirePsi ?? 32);
+    final fRoll = crr * massKg * kG;
+    final vEff = v + (headwindKmh ?? 0) / 3.6;
+    final fAero = 0.5 * kRho * cdA * vEff * vEff;
     final fTotal = fRoll + fAero;
     final ec = fTotal / (3.6 * _eta(mode));
     return ec + kPaux / math.max(kmh, 5.0);
   }
 
-  double whPerKmForMode(RideMode mode) => whPerKmAt(refSpeed(mode), mode);
+  double whPerKmForMode(RideMode mode, {WeatherInfo? weather, double? tirePsi}) {
+    final v = refSpeed(mode);
+    final hw = weather?.headwindKmh(90) ?? 0; // course-agnostic default
+    return whPerKmAt(v, mode, tirePsi: tirePsi, headwindKmh: hw);
+  }
 
   /// Trip consumption (Wh/km) with stop-go correction from stops/km.
   double whPerKmTrip({
     required double avgSpeedKmh,
     required RideMode mode,
     required double stopsPerKm,
+    double? tirePsi,
+    WeatherInfo? weather,
   }) {
-    final base = whPerKmAt(avgSpeedKmh, mode);
+    final base = whPerKmAt(avgSpeedKmh, mode, tirePsi: tirePsi);
     final kStopGo = 1.0 + math.min(stopsPerKm * 0.06, 0.4);
     return base * kStopGo;
   }
@@ -135,18 +286,25 @@ class RangeEngine {
 
   RangeEngine({required this.estimator, required this.factors, required this.usableWh});
 
-  RangeReport report(Telemetry t, double currentSpeedKmh, double stopsPerKm) {
+  RangeReport report(
+    Telemetry t,
+    double currentSpeedKmh,
+    double stopsPerKm, {
+    WeatherInfo? weather,
+    double? tirePsi,
+  }) {
     final soc = (t.socPercent.clamp(0, 100)) / 100.0;
     final energyNow = usableWh * soc;
 
     double kmFor(RideMode m) {
       final factor = factors.factorFor(m);
-      final ec = estimator.whPerKmForMode(m) * factor;
+      final ec = estimator.whPerKmForMode(m, weather: weather, tirePsi: tirePsi) * factor;
       return energyNow / ec;
     }
 
     final liveMode = modeForSpeed(currentSpeedKmh);
-    final liveEc = estimator.whPerKmAt(currentSpeedKmh, liveMode) * factors.factorFor(liveMode);
+    final liveEc = estimator.whPerKmAt(currentSpeedKmh, liveMode, tirePsi: tirePsi) *
+        factors.factorFor(liveMode);
     final liveKm = energyNow / liveEc;
 
     return RangeReport(
@@ -160,7 +318,7 @@ class RangeEngine {
 
   BatteryHealth health(Telemetry t, {double? calibratedSoH}) {
     final cycles = t.cycleCount;
-    // Degradation model: ~35% fade over 2000 cycles, plus spread penalty.
+    // Research-based capacity fade: consumer NMC ~80% at 900–1400 cycles.
     var soh = 100.0 - cycles * 0.018;
     if (calibratedSoH != null) soh = calibratedSoH;
     soh -= t.cellSpreadMv * 0.05;
@@ -199,16 +357,21 @@ class RangeEngine {
     required RideMode mode,
     required double stopsPerKm,
     required double avgSpeedKmh,
+    WeatherInfo? weather,
+    double? tirePsi,
+    int daysSinceTyreCheck = 999,
   }) {
     final expected = estimator.whPerKmTrip(
           avgSpeedKmh: avgSpeedKmh,
           mode: mode,
           stopsPerKm: stopsPerKm,
+          tirePsi: tirePsi,
+          weather: weather,
         ) *
         factors.factorFor(mode);
     final ratio = whPerKmMeasured / expected;
 
-    if (ratio < 1.10) {
+    if (ratio < 1.06) {
       return const DiagnosticResult(
         lessRange: false,
         title: 'Efficiency in expected range',
@@ -219,11 +382,17 @@ class RangeEngine {
     final over = ((ratio - 1.0) * 100).round();
     final hints = <String>[
       'Consumption is $over% above expected for ${modeName(mode)} mode.',
-      '1 · Weather/wind: headwind strongly increases consumption.',
+      if (weather != null && weather.windSpeedKmh > 8)
+        '1 · Weather/wind: ${weather.windSpeedKmh.toStringAsFixed(0)} km/h wind '
+            '(${weather.tempC.toStringAsFixed(0)}°C) strongly affects consumption.',
+      if (weather != null && weather.tempC < 10)
+        '2 · Cold battery: ~${((10 - weather.tempC) * 1.5).round()}% capacity loss at '
+            '${weather.tempC.toStringAsFixed(0)}°C — expected in winter.',
       '2 · Tyre pressure: check and inflate (low pressure raises rolling loss).',
       '3 · Drivetrain drag: check brake drag, bearings, wheel alignment.',
       '4 · Riding style: hard acceleration and stop-go raises consumption.',
       if (stopsPerKm > 2.0) '5 · Many stops (${stopsPerKm.toStringAsFixed(1)}/km) — expected for city riding.',
+      if (daysSinceTyreCheck > 30) '6 · Tyre not checked in 30+ days — do it now.',
       'Battery itself is NOT the primary suspect — SOH is shown separately.',
     ];
     return DiagnosticResult(

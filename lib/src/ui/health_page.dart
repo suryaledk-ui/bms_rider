@@ -220,6 +220,7 @@ class _SohCard extends StatelessWidget {
                       _kv('Cycles', '${health.cycles}'),
                       _kv('Cell spread', '${health.cellSpreadMv.toStringAsFixed(0)} mV'),
                       _kv('Thermal sag', '${health.sagDropV.toStringAsFixed(1)} V @ load'),
+                      _kv('Pack temp', _tempLabel()),
                       _kv('Protocol', t.protocol),
                     ],
                   ),
@@ -242,5 +243,17 @@ class _SohCard extends StatelessWidget {
         ],
       ),
     );
+  }
+
+  String _tempLabel() {
+    final t = this.t as dynamic;
+    final temps = t.tempsC as List<double>?;
+    if (temps == null || temps.isEmpty) return '—';
+    final c = temps.map((x) => x.toStringAsFixed(1)).join(' / ');
+    var extra = '';
+    final mx = temps.reduce((a, b) => a > b ? a : b);
+    if (mx > 50) extra = ' · HOT';
+    if (mx < 0) extra = ' · cold';
+    return '$c°C$extra';
   }
 }

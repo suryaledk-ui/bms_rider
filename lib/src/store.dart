@@ -53,8 +53,19 @@ class AppStore {
   double get tirePressurePsi => prefs?.getDouble('tire_pressure_psi') ?? 32.0;
   Future<void> setTirePressurePsi(double v) async => prefs?.setDouble('tire_pressure_psi', v);
 
+  DateTime? get tirePressureCheckedAt {
+    final ms = prefs?.getInt('tire_pressure_checked_ms');
+    return ms == null ? null : DateTime.fromMillisecondsSinceEpoch(ms);
+  }
+
+  Future<void> setTirePressureCheckedAt(DateTime t) async =>
+      prefs?.setInt('tire_pressure_checked_ms', t.millisecondsSinceEpoch);
+
   double get usableWh => prefs?.getDouble('usable_wh') ?? 960.0; // 48V20Ah default
   Future<void> setUsableWh(double v) async => prefs?.setDouble('usable_wh', v);
+
+  String get vehiclePresetId => prefs?.getString('vehicle_preset_id') ?? 'generic_48v20ah';
+  Future<void> setVehiclePresetId(String v) async => prefs?.setString('vehicle_preset_id', v);
 
   double? get calibratedSoH => prefs?.getDouble('calibrated_soh');
 

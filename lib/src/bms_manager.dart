@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 
 import 'models.dart';
+import 'native_legacy_scan.dart';
 import 'native_permissions.dart';
 import 'protocol.dart';
 import 'protocol_daly.dart';
@@ -101,7 +102,9 @@ class BmsManager extends ChangeNotifier {
     await FlutterBluePlus.stopScan();
 
     // Preflight 1: adapter must actually be ON.
-    if (!await ensureAdapterOn()) {
+    final adapterOn = await ensureAdapterOn();
+    debugPrint('[SCANDBG] adapterOn=$adapterOn state=${FlutterBluePlus.adapterStateNow}');
+    if (!adapterOn) {
       state = BmsState.error;
       status = 'Bluetooth is OFF — turn it on (Quick Settings) and try again';
       _lg('SCAN', 'aborted: adapter not on');
@@ -110,7 +113,9 @@ class BmsManager extends ChangeNotifier {
     }
 
     // Preflight 2: permissions must actually be granted.
-    if (!await ensurePermissions()) {
+    final permOk = await ensurePermissions();
+    debugPrint('[SCANDBG] permissionsOk=$permOk');
+    if (!permOk) {
       state = BmsState.error;
       status = 'Bluetooth permission denied — allow it in Settings and try again';
       _lg('SCAN', 'aborted: permissions missing/denied');
@@ -127,8 +132,66 @@ class BmsManager extends ChangeNotifier {
     candidates = [];
     status = 'Scanning for nearby BLE devices…';
     _lg('SCAN', 'scan started (all devices, no filters) adapter=${FlutterBluePlus.adapterStateNow}');
+    debugPrint('[SCANDBG] starting scan isScanningNow=${FlutterBluePlus.isScanningNow}');
     notifyListeners();
 
+    // Phase 1: NATIVE LEGACY scan (BluetoothAdapter.startLeScan) — the exact
+    // API BAT-BMS/FastBLE uses, which works on cheap Android 12 stacks where
+    // the new BluetoothLeScanner silently returns nothing.
+    // Phase 2 (if still zero): flutter_blue_plus scan fallback.
+    final first = await _runNativeLegacyScan();
+    if (first.isEmpty) {
+      _lg('SCAN', 'legacy scan empty — retrying with FBP scan');
+      debugPrint('[SCANDBG] legacy scan empty → FBP scan');
+      candidates = await _runFbpScan();
+    } else {
+      candidates = first;
+    }
+
+    state = BmsState.idle;
+    if (candidates.isEmpty) {
+      status = 'No BLE devices found — turn scooter on and retry';
+      _lg('SCAN', 'finished: 0 devices seen (both phases)');
+    } else {
+      status = '${candidates.length} device(s) found';
+      _lg('SCAN', 'finished: ${candidates.length} devices seen');
+    }
+    notifyListeners();
+  }
+
+  Future<List<ScanCandidate>> _runNativeLegacyScan() async {
+    final started = DateTime.now();
+    final raw = await NativeLegacyScan.scan(const Duration(seconds: 8));
+    final elapsed = DateTime.now().difference(started).inMilliseconds;
+    debugPrint('[SCANDBG] native legacy scan done in ${elapsed}ms results=${raw.length}');
+
+    final results = <String, ScanCandidate>{};
+    for (final r in raw) {
+      if (r.id.isEmpty) continue;
+      final guess = guessFamily(const [], r.name);
+      // Skip nameless non-BMS noise (no name).
+      if (guess == null && r.name.isEmpty) continue;
+      results[r.id] = ScanCandidate(
+        id: r.id,
+        name: r.name.isEmpty ? '(no name)' : r.name,
+        guess: guess == null ? 'Unknown' : familyHint(guess),
+        rssi: r.rssi,
+        bonded: false,
+      );
+      debugPrint('[SCANDBG] [legacy] seen ${r.id} name="${r.name.isEmpty ? '(none)' : r.name}" '
+          'rssi=${r.rssi} family=${guess == null ? 'unknown' : familyHint(guess)}');
+    }
+    final list = results.values.toList();
+    list.sort((a, b) {
+      final aKnown = a.guess != 'Unknown' ? 0 : 1;
+      final bKnown = b.guess != 'Unknown' ? 0 : 1;
+      if (aKnown != bKnown) return aKnown - bKnown;
+      return b.rssi.compareTo(a.rssi);
+    });
+    return list.take(50).toList();
+  }
+
+  Future<List<ScanCandidate>> _runFbpScan() async {
     final results = <String, ScanCandidate>{};
     final sub = FlutterBluePlus.scanResults.listen((rs) {
       for (final r in rs) {
@@ -155,46 +218,36 @@ class BmsManager extends ChangeNotifier {
           rssi: r.rssi,
           bonded: false,
         );
-        _lg(
-          'SCAN',
-          'seen $id name="${name.isEmpty ? '(none)' : name}" '
-          'svcs=${r.advertisementData.serviceUuids.map((g) => g.toString()).join(',')} '
-          'rssi=${r.rssi} family=${guess == null ? 'unknown' : familyHint(guess)}',
-        );
+        debugPrint('[SCANDBG] [fbp] seen $id name="${name.isEmpty ? '(none)' : name}" '
+            'svcs=${r.advertisementData.serviceUuids.map((g) => g.toString()).join(',')} '
+            'rssi=${r.rssi} family=${guess == null ? 'unknown' : familyHint(guess)}');
       }
-      final list = results.values.toList();
-      list.sort((a, b) {
-        final aKnown = a.guess != 'Unknown' ? 0 : 1;
-        final bKnown = b.guess != 'Unknown' ? 0 : 1;
-        if (aKnown != bKnown) return aKnown - bKnown;
-        return b.rssi.compareTo(a.rssi);
-      });
-      candidates = list.take(50).toList();
-      notifyListeners();
     });
 
     try {
       await FlutterBluePlus.startScan(
         androidCheckLocationServices: false,
-        timeout: const Duration(seconds: 10),
+        androidLegacy: true,
+        androidUsesFineLocation: true,
+        timeout: const Duration(seconds: 8),
       );
+      debugPrint('[SCANDBG] FBP scan returned results=${results.length}');
     } catch (e) {
-      status = 'Scan error: $e';
-      _lg('SCAN', 'scan threw: $e');
+      debugPrint('[SCANDBG] FBP scan threw: $e');
+      _lg('SCAN', 'FBP scan threw: $e');
     } finally {
       await sub.cancel();
       await FlutterBluePlus.stopScan();
-      if (state == BmsState.scanning) {
-        state = BmsState.idle;
-        if (candidates.isEmpty) {
-          status = 'No BLE devices found — turn scooter on and retry';
-          _lg('SCAN', 'finished: 0 devices seen');
-        } else {
-          _lg('SCAN', 'finished: ${candidates.length} devices seen');
-        }
-      }
-      notifyListeners();
     }
+
+    final list = results.values.toList();
+    list.sort((a, b) {
+      final aKnown = a.guess != 'Unknown' ? 0 : 1;
+      final bKnown = b.guess != 'Unknown' ? 0 : 1;
+      if (aKnown != bKnown) return aKnown - bKnown;
+      return b.rssi.compareTo(a.rssi);
+    });
+    return list.take(50).toList();
   }
 
   Future<void> connectTo(ScanCandidate c) async {
@@ -345,7 +398,8 @@ class BmsManager extends ChangeNotifier {
 
     proto!.send = (bytes) {
       try {
-        writeChar.write(bytes, withoutResponse: true);
+        // BAT-BMS uses write-with-response (default); match that.
+        writeChar.write(bytes);
       } catch (_) {}
     };
     proto!.onTelemetry = (t) {

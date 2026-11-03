@@ -11,6 +11,7 @@ import 'native_permissions.dart';
 import 'range.dart';
 import 'scan_log.dart';
 import 'store.dart';
+import 'weather.dart';
 
 class ActiveRide {
   DateTime start = DateTime.now();
@@ -50,7 +51,10 @@ class AppController extends ChangeNotifier {
   DiagnosticResult? lastDiagnostic;
   List<Trip> history = [];
 
+  WeatherInfo? weather;
+  bool _weatherFetched = false;
   double gpsSpeedKmh = 0;
+  double gpsHeadingDeg = 0;
 
   AppController() {
     bms.attachStorage(
@@ -71,10 +75,55 @@ class AppController extends ChangeNotifier {
     );
     await bms.init();
     await refreshHistory();
+
+    // Auto-scan shortly after launch when no scooter is saved yet — makes
+    // first-run discovery instant, and doubles as a self-test on connect.
+    if (store.savedDeviceId == null || store.savedDeviceId!.isEmpty) {
+      Future<void>.delayed(const Duration(seconds: 2), () {
+        if (!_autoScanFired) {
+          _autoScanFired = true;
+          requestPermissionsAndScan();
+        }
+      });
+    }
   }
+
+  bool _autoScanFired = false;
 
   Future<void> refreshHistory() async {
     history = await store.rides();
+    notifyListeners();
+  }
+
+  /// Apply rider/scooter/tyre/capacity profile changes live.
+  Future<void> updateProfile({
+    double? riderWeightKg,
+    double? scooterWeightKg,
+    double? tirePressurePsi,
+    double? usableWh,
+    VehiclePreset? preset,
+  }) async {
+    if (preset != null) {
+      await store.setVehiclePresetId(preset.id);
+      await store.setScooterWeightKg(preset.scooterKg);
+      await store.setUsableWh(preset.usableWh);
+      await store.setTirePressurePsi(preset.ratedPhi);
+      await store.setTirePressureCheckedAt(DateTime.now());
+    } else {
+      if (riderWeightKg != null) await store.setRiderWeightKg(riderWeightKg);
+      if (scooterWeightKg != null) await store.setScooterWeightKg(scooterWeightKg);
+      if (tirePressurePsi != null) {
+        await store.setTirePressurePsi(tirePressurePsi);
+        await store.setTirePressureCheckedAt(DateTime.now());
+      }
+      if (usableWh != null) await store.setUsableWh(usableWh);
+    }
+    final mass = store.scooterWeightKg + store.riderWeightKg;
+    range = RangeEngine(
+      estimator: RangeEstimator(massKg: mass),
+      factors: store.factors,
+      usableWh: store.usableWh,
+    );
     notifyListeners();
   }
 
@@ -116,7 +165,19 @@ class AppController extends ChangeNotifier {
       r.lastLng = pos.longitude;
       r.hasFix = true;
       gpsSpeedKmh = pos.speed * 3.6;
+      gpsHeadingDeg = pos.heading;
       if (gpsSpeedKmh > r.maxSpeed) r.maxSpeed = gpsSpeedKmh;
+
+      // Fetch ambient weather once per ride (temp/wind for range accuracy).
+      if (!_weatherFetched) {
+        _weatherFetched = true;
+        fetchWeather(pos.latitude, pos.longitude).then((w) {
+          if (w != null) {
+            weather = w;
+            notifyListeners();
+          }
+        });
+      }
 
       final moving = gpsSpeedKmh > 1.5;
       if (!moving && r.wasMoving) {
@@ -204,16 +265,26 @@ class AppController extends ChangeNotifier {
             avgSpeedKmh: trip.avgSpeedKmh,
             mode: dom,
             stopsPerKm: stopsPerKm,
+            tirePsi: store.tirePressurePsi,
+            weather: weather,
           );
       final ratio = whPerKm / expected;
       range.factors = range.factors.updated(dom, ratio);
       await store.saveFactors(range.factors);
+
+      final lastCheck = store.tirePressureCheckedAt;
+      final daysSinceCheck = lastCheck == null
+          ? 999
+          : DateTime.now().difference(lastCheck).inDays;
 
       lastDiagnostic = range.diagnoseTrip(
         whPerKmMeasured: whPerKm,
         mode: dom,
         stopsPerKm: stopsPerKm,
         avgSpeedKmh: trip.avgSpeedKmh,
+        weather: weather,
+        tirePsi: store.tirePressurePsi,
+        daysSinceTyreCheck: daysSinceCheck,
       );
     }
 
