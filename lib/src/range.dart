@@ -241,6 +241,16 @@ class RiderFactors {
   }
 }
 
+/// Feature inputs for the ML range model (see ml_range.dart).
+typedef MlInput = ({
+  double speedKmh,
+  double stopsPerKm,
+  double massKg,
+  double tirePsi,
+  double? tempC,
+  double? headwindKmh,
+});
+
 class RangeReport {
   final double ecoKm;
   final double sportsKm;
@@ -293,6 +303,7 @@ class RangeEngine {
     WeatherInfo? weather,
     double? tirePsi,
     int cutoffSocPercent = 0,
+    double? Function(RideMode mode, MlInput input)? mlPredict,
   }) {
     // A scooter controller often cuts off before the BMS reports 0%
     // (e.g. stops at 52–54 V while BMS still shows 15–25%). Treat that
@@ -305,8 +316,22 @@ class RangeEngine {
     final energyNow = usableWh * frac;
 
     double kmFor(RideMode m) {
-      final factor = factors.factorFor(m);
-      final ec = estimator.whPerKmForMode(m, weather: weather, tirePsi: tirePsi) * factor;
+      // ML (when warm: n ≥ 5) replaces physics×factor for the stable mode
+      // rows; otherwise keep the existing learned-factor path.
+      final ml = mlPredict?.call(
+        m,
+        (
+          speedKmh: RangeEstimator.refSpeed(m),
+          stopsPerKm: stopsPerKm,
+          massKg: estimator.massKg,
+          tirePsi: tirePsi ?? 32,
+          tempC: weather?.tempC,
+          headwindKmh: weather?.headwindKmh(90),
+        ),
+      );
+      final ec = ml ??
+          (estimator.whPerKmForMode(m, weather: weather, tirePsi: tirePsi) *
+              factors.factorFor(m));
       return energyNow / ec;
     }
 

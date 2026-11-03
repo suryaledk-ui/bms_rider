@@ -6,6 +6,7 @@ import 'package:geolocator/geolocator.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
 
 import 'bms_manager.dart';
+import 'ml_range.dart';
 import 'models.dart';
 import 'native_permissions.dart';
 import 'native_notifications.dart';
@@ -45,6 +46,7 @@ class AppController extends ChangeNotifier {
   final AppStore store = AppStore();
   final ScanLogger scanLog = ScanLogger();
   late RangeEngine range;
+  late final RangeMl ml;
 
   ActiveRide? ride;
   StreamSubscription<Position>? _gpsSub;
@@ -70,11 +72,13 @@ class AppController extends ChangeNotifier {
     bms.attachLogger(scanLog);
     bms.telemetry.listen(_onTelemetry);
     final mass = store.scooterWeightKg + store.riderWeightKg;
+    final estimator = RangeEstimator(massKg: mass);
     range = RangeEngine(
-      estimator: RangeEstimator(massKg: mass),
+      estimator: estimator,
       factors: store.factors,
       usableWh: store.usableWh,
     );
+    ml = RangeMl(estimator: estimator, state: store.mlState);
     await bms.init();
     await refreshHistory();
 
@@ -269,6 +273,11 @@ class AppController extends ChangeNotifier {
 
   double get currentSpeedKmh => gpsSpeedKmh;
 
+  /// Speed used for display + live range: EMA-smoothed version of the raw
+  /// GPS speed, so the UI doesn't jump around (GPS is noisy/jittery).
+  double _smoothedSpeedKmh = 0;
+  double get smoothedSpeedKmh => _smoothedSpeedKmh;
+
   Future<void> startRide() async {
     if (ride != null) return;
     final t = bms.latest;
@@ -302,6 +311,9 @@ class AppController extends ChangeNotifier {
       r.hasFix = true;
       gpsSpeedKmh = pos.speed * 3.6;
       gpsHeadingDeg = pos.heading;
+      // EMA smoothing: fast enough to feel instant, slow enough to hide
+      // GPS jitter (alpha ~0.25 → settle in ~2–3 updates).
+      _smoothedSpeedKmh += (gpsSpeedKmh - _smoothedSpeedKmh) * 0.25;
       if (gpsSpeedKmh > r.maxSpeed) r.maxSpeed = gpsSpeedKmh;
 
       // Fetch ambient weather once per ride (temp/wind for range accuracy).

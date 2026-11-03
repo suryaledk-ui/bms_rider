@@ -110,6 +110,21 @@ class AppStore {
     await prefs?.setString('rider_factors', jsonEncode(f.factors));
   }
 
+  // -- ML range model (online Bayesian ridge) --
+  Map<String, dynamic> get mlState {
+    final raw = prefs?.getString('ml_ridge_v1');
+    if (raw == null) return {};
+    try {
+      final dec = jsonDecode(raw);
+      if (dec is Map<String, dynamic>) return dec;
+    } catch (_) {}
+    return {};
+  }
+
+  Future<void> setMlState(Map<String, dynamic> state) async {
+    await prefs?.setString('ml_ridge_v1', jsonEncode(state));
+  }
+
   // -- rides --
   Future<int> insertTrip(Trip t) async {
     return _db!.insert('rides', {
