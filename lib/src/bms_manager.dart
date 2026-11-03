@@ -5,6 +5,7 @@ import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 
 import 'models.dart';
 import 'native_legacy_scan.dart';
+import 'native_location_services.dart';
 import 'native_permissions.dart';
 import 'protocol.dart';
 import 'protocol_daly.dart';
@@ -95,10 +96,24 @@ class BmsManager extends ChangeNotifier {
   }
 
   Future<void> scan() async {
-    if (state == BmsState.scanning) {
-      _lg('SCAN', 'scan() ignored — already scanning');
+    // Synchronous guard (set before any await) so parallel triggers
+    // (auto-scan + manual button) cannot start two overlapping scans.
+    if (_scanInFlight) {
+      _lg('SCAN', 'scan() ignored — scan already in flight');
       return;
     }
+    _scanInFlight = true;
+
+    try {
+      await _scanInternal();
+    } finally {
+      _scanInFlight = false;
+    }
+  }
+
+  bool _scanInFlight = false;
+
+  Future<void> _scanInternal() async {
     await FlutterBluePlus.stopScan();
 
     // Preflight 1: adapter must actually be ON.
@@ -121,6 +136,21 @@ class BmsManager extends ChangeNotifier {
       _lg('SCAN', 'aborted: permissions missing/denied');
       notifyListeners();
       return;
+    }
+
+    // Preflight 3: Android silently drops ALL scan results while the system
+    // Location Services (GPS master switch) is OFF — BLE scanning is treated
+    // as location-derived because we don't declare neverForLocation.
+    if (kIsWeb == false && defaultTargetPlatform == TargetPlatform.android) {
+      final locationOn = await NativeLocationServices.isEnabled();
+      debugPrint('[SCANDBG] locationServicesOn=$locationOn');
+      if (!locationOn) {
+        state = BmsState.error;
+        status = 'Location Services are OFF — enable GPS Location in Quick Settings, then scan again';
+        _lg('SCAN', 'aborted: location services off');
+        notifyListeners();
+        return;
+      }
     }
 
     // Small settle delay after granting permissions: the very first scan on

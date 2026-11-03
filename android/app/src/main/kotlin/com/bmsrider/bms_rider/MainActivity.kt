@@ -17,6 +17,7 @@ import io.flutter.plugin.common.MethodChannel
 class MainActivity : FlutterActivity() {
     private val channelName = "bmsrider/permissions"
     private val legacyScanChannelName = "bmsrider/legacy_scan"
+    private val locationServicesChannelName = "bmsrider/location_services"
     private var pendingResult: MethodChannel.Result? = null
 
     // ---- Legacy BLE scan (BluetoothAdapter.startLeScan) ----
@@ -106,6 +107,16 @@ class MainActivity : FlutterActivity() {
                 }
             }
 
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, locationServicesChannelName)
+            .setMethodCallHandler { call, result ->
+                when (call.method) {
+                    "isEnabled" -> {
+                        result.success(isLocationServicesEnabled())
+                    }
+                    else -> result.notImplemented()
+                }
+            }
+
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, legacyScanChannelName)
             .setMethodCallHandler { call, result ->
                 when (call.method) {
@@ -123,6 +134,19 @@ class MainActivity : FlutterActivity() {
                     else -> result.notImplemented()
                 }
             }
+    }
+
+    private fun isLocationServicesEnabled(): Boolean {
+        val lm = applicationContext.getSystemService(android.content.Context.LOCATION_SERVICE) as? LocationManager ?: return false
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            lm.isLocationEnabled
+        } else {
+            android.provider.Settings.Secure.getInt(
+                contentResolver,
+                android.provider.Settings.Secure.LOCATION_MODE,
+                android.provider.Settings.Secure.LOCATION_MODE_OFF,
+            ) != android.provider.Settings.Secure.LOCATION_MODE_OFF
+        }
     }
 
     private fun requestImpl(perms: List<String>, result: MethodChannel.Result) {
