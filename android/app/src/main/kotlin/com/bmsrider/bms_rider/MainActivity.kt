@@ -199,7 +199,7 @@ class MainActivity : FlutterActivity() {
                 .setAutoCancel(true)
                 .setContentIntent(pi)
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                builder.color = getColor(android.R.color.holo_green_dark)
+                builder.setColor(getColor(android.R.color.holo_green_dark))
             }
             nm.notify(1001, builder.build())
         } catch (_: Exception) {
