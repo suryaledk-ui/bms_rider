@@ -63,9 +63,17 @@ class JbdProtocol implements BmsProtocol {
 
       if (frame[total - 1] != 0x77) continue; // garbage, resync
 
-      final sum = sum8(frame, 2, total - 3);
+      // Clone boards (e.g. "60v 30a" JBD clones) emit a real 16-bit
+      // inverted-sum checksum; some boards use the 8-bit variant.
+      // Accept both.
+      var s16 = 0;
+      for (var i = 2; i < total - 3; i++) {
+        s16 = (s16 + frame[i]) & 0xFFFF;
+      }
       final chk = rdU16BE(frame, total - 3);
-      if (chk != ((0 - sum) & 0xFFFF)) continue; // bad checksum
+      final ok16 = chk == ((0 - s16) & 0xFFFF);
+      final ok8 = chk == ((0 - (s16 & 0xFF)) & 0xFF);
+      if (!ok16 && !ok8) continue; // bad checksum
 
       _dispatch(frame, len);
     }

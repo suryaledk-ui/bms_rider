@@ -383,6 +383,12 @@ class BmsManager extends ChangeNotifier {
       return;
     }
     final BluetoothCharacteristic writeChar = tx;
+    // Some BMS modules (e.g. JBD clones) expose the TX characteristic as
+    // write-without-response only. Writing "with response" to those fails
+    // silently on Android, so no frames ever reach the BMS. Match the
+    // characteristic's actual properties.
+    final writeWithoutResponse =
+        writeChar.properties.writeWithoutResponse && !writeChar.properties.write;
 
     final family = _detectFamily(services, device.platformName);
     _lg('CONN', 'protocol family detected: $family for ${device.remoteId.str}');
@@ -398,9 +404,14 @@ class BmsManager extends ChangeNotifier {
 
     proto!.send = (bytes) {
       try {
-        // BAT-BMS uses write-with-response (default); match that.
-        writeChar.write(bytes);
-      } catch (_) {}
+        if (writeWithoutResponse) {
+          writeChar.write(bytes, withoutResponse: true);
+        } else {
+          writeChar.write(bytes);
+        }
+      } catch (e) {
+        _lg('CONN', 'write failed (withoutResponse=$writeWithoutResponse): $e');
+      }
     };
     proto!.onTelemetry = (t) {
       latest = t;
