@@ -445,11 +445,23 @@ class BmsManager extends ChangeNotifier {
     };
     proto!.onTelemetry = (t) {
       latest = t;
+      _lastDataAt = DateTime.now();
+      _dataTimedOut = false;
       _telemetry.add(t);
       notifyListeners();
     };
 
     rx.onValueReceived.listen(proto!.feed);
+
+    // ENABLE NOTIFICATIONS — this is the missing piece. BMS frames only
+    // arrive when the notify CCCD is set. Without it the connection looks
+    // fine but no telemetry ever arrives.
+    try {
+      await rx.setNotifyValue(true).timeout(const Duration(seconds: 5));
+      _lg('CONN', 'notify enabled on ${rx.uuid}');
+    } catch (e) {
+      _lg('CONN', 'setNotifyValue failed: $e');
+    }
 
     final ok = await proto!.init();
     if (!ok) {
@@ -476,6 +488,40 @@ class BmsManager extends ChangeNotifier {
       _cellTimer = Timer.periodic(const Duration(seconds: 4), (_) {
         jbd.send(jbd.pollCells());
       });
+    }
+
+    // Liveness watchdog: if no telemetry arrives after connect, surface it
+    // instead of silently staying "connected". Force a reconnect after 30s
+    // without data (fresh GATT session often fixes stale notify state).
+    _lastDataAt = DateTime.now();
+    _dataTimedOut = false;
+    _livenessTimer?.cancel();
+    _livenessTimer = Timer.periodic(const Duration(seconds: 5), (_) {
+      _checkLiveness();
+    });
+  }
+
+  DateTime? _lastDataAt;
+  bool _dataTimedOut = false;
+  Timer? _livenessTimer;
+
+  void _checkLiveness() {
+    if (state != BmsState.connected) return;
+    final t = _lastDataAt;
+    if (t == null) return;
+    final age = DateTime.now().difference(t).inSeconds;
+    if (age > 30) {
+      if (!_dataTimedOut) {
+        _dataTimedOut = true;
+        _lg('CONN', 'no telemetry for 30s — force reconnect');
+        status = 'Connected but no data — reconnecting…';
+        notifyListeners();
+        _intentionalStop = false;
+        _device?.disconnect(); // state listener schedules reconnect
+      }
+    } else if (age > 12) {
+      status = 'Connected · waiting for data…';
+      notifyListeners();
     }
   }
 
@@ -519,6 +565,7 @@ class BmsManager extends ChangeNotifier {
     _pollTimer?.cancel();
     _cellTimer?.cancel();
     _retryTimer?.cancel();
+    _livenessTimer?.cancel();
     await _device?.disconnect();
     proto?.dispose();
     proto = null;
@@ -533,6 +580,7 @@ class BmsManager extends ChangeNotifier {
     _pollTimer?.cancel();
     _cellTimer?.cancel();
     _retryTimer?.cancel();
+    _livenessTimer?.cancel();
     _telemetry.close();
     super.dispose();
   }
