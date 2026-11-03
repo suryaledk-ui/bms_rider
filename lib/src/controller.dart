@@ -117,10 +117,10 @@ class AppController extends ChangeNotifier {
     if (!_wasCharging || _chargeEnergyWs == null || _chargeStartedAt == null) {
       return null;
     }
-    final elapsedMin = DateTime.now().difference(_chargeStartedAt!).inSeconds / 60.0;
+    final elapsedMin =
+        DateTime.now().difference(_chargeStartedAt!).inSeconds / 60.0;
     if (elapsedMin < 1.5) return null;
-    final avgRateWhPerMin =
-        (_chargeEnergyWs! / 3600.0) / elapsedMin;
+    final avgRateWhPerMin = (_chargeEnergyWs! / 3600.0) / elapsedMin;
     if (avgRateWhPerMin <= 0) return null;
     final soc = bms.latest?.socPercent;
     if (soc == null) return null;
@@ -153,8 +153,10 @@ class AppController extends ChangeNotifier {
           factors: store.factors,
           usableWh: derivedWh,
         );
-        scanLog.log('BMS', 'auto-derived usableWh=${derivedWh.toStringAsFixed(0)} '
-            '(nom ${t.nominalAh.toStringAsFixed(2)}Ah × ${t.cellVolts.length} cells)');
+        scanLog.log(
+            'BMS',
+            'auto-derived usableWh=${derivedWh.toStringAsFixed(0)} '
+                '(nom ${t.nominalAh.toStringAsFixed(2)}Ah × ${t.cellVolts.length} cells)');
         notifyListeners();
       }
     }
@@ -208,7 +210,8 @@ class AppController extends ChangeNotifier {
         final est = used / (delta / 100.0);
         if (est > 200 && est < 8000) {
           final improved = _estimatedCapacityWh == null ||
-              (est - _estimatedCapacityWh!).abs() / _estimatedCapacityWh! > 0.05;
+              (est - _estimatedCapacityWh!).abs() / _estimatedCapacityWh! >
+                  0.05;
           if (improved) {
             _estimatedCapacityWh = est;
             _capacityEstimatedAt = DateTime.now();
@@ -217,8 +220,10 @@ class AppController extends ChangeNotifier {
                       .clamp(20, 120))
                   .toDouble(),
             );
-            scanLog.log('BMS', 'auto capacity estimate ≈${est.toStringAsFixed(0)}Wh '
-                '(ΔSOC $delta%, ${used.toStringAsFixed(1)}Wh used)');
+            scanLog.log(
+                'BMS',
+                'auto capacity estimate ≈${est.toStringAsFixed(0)}Wh '
+                    '(ΔSOC $delta%, ${used.toStringAsFixed(1)}Wh used)');
           }
         }
         _socAnchor = t.socPercent.toDouble();
@@ -246,7 +251,9 @@ class AppController extends ChangeNotifier {
       await store.setTirePressureCheckedAt(DateTime.now());
     } else {
       if (riderWeightKg != null) await store.setRiderWeightKg(riderWeightKg);
-      if (scooterWeightKg != null) await store.setScooterWeightKg(scooterWeightKg);
+      if (scooterWeightKg != null) {
+        await store.setScooterWeightKg(scooterWeightKg);
+      }
       if (tirePressurePsi != null) {
         await store.setTirePressurePsi(tirePressurePsi);
         await store.setTirePressureCheckedAt(DateTime.now());
@@ -293,11 +300,17 @@ class AppController extends ChangeNotifier {
     lastDiagnostic = null;
     await WakelockPlus.enable();
 
+    // Android explicitly tuned: high accuracy, min 2 m movement, 500 ms
+    // interval (hardware-dependent). geolocator 14 has no nested
+    // `androidSettings` on LocationSettings — you pass an AndroidSettings
+    // instance directly as locationSettings, which the Android plugin reads
+    // via toJson() (includes accuracy/distanceFilter/timeLimit + interval).
     _gpsSub = Geolocator.getPositionStream(
-      locationSettings: LocationSettings(
+      locationSettings: AndroidSettings(
         accuracy: LocationAccuracy.high,
         distanceFilter: 2,
         timeLimit: null,
+        intervalDuration: const Duration(milliseconds: 500),
       ),
     ).listen((pos) {
       final r = ride;
@@ -368,7 +381,8 @@ class AppController extends ChangeNotifier {
     r.modeSeconds[mode] = (r.modeSeconds[mode] ?? 0) + dt;
 
     if (speed > 0) {
-      r.avgSpeedKmh = r.distanceM / 1000.0 / (now.difference(r.start).inSeconds / 3600.0);
+      r.avgSpeedKmh =
+          r.distanceM / 1000.0 / (now.difference(r.start).inSeconds / 3600.0);
     }
     r.socEnd = t.socPercent;
     notifyListeners();
@@ -397,8 +411,10 @@ class AppController extends ChangeNotifier {
     if (whUsed < 2.0 && socDelta >= 1.0) {
       final socBased = store.usableWh * (socDelta / 100.0);
       if (socBased > whUsed) {
-        scanLog.log('BMS', 'current sign fallback: raw ${whUsed.toStringAsFixed(1)}Wh '
-            '→ SOC-based ${socBased.toStringAsFixed(1)}Wh (ΔSOC $socDelta%)');
+        scanLog.log(
+            'BMS',
+            'current sign fallback: raw ${whUsed.toStringAsFixed(1)}Wh '
+                '→ SOC-based ${socBased.toStringAsFixed(1)}Wh (ΔSOC $socDelta%)');
         whUsed = socBased;
       }
     }
@@ -438,29 +454,29 @@ class AppController extends ChangeNotifier {
     if (distKm > 0.05 && whPerKm > 0) {
       // update rider factor, using the trip's own weight snapshot
       final stopsPerKm = distKm > 0 ? r.stops / distKm : 0.0;
-      final massKg =
-          (trip.riderKg + trip.scooterKg) > 0
-              ? trip.riderKg + trip.scooterKg
-              : store.scooterWeightKg + store.riderWeightKg;
+      final massKg = (trip.riderKg + trip.scooterKg) > 0
+          ? trip.riderKg + trip.scooterKg
+          : store.scooterWeightKg + store.riderWeightKg;
       final estimator = RangeEstimator(massKg: massKg);
       final expected = estimator.whPerKmTrip(
-            avgSpeedKmh: trip.avgSpeedKmh,
-            mode: dom,
-            stopsPerKm: stopsPerKm,
-            tirePsi: store.tirePressurePsi,
-            weather: weather,
-          );
+        avgSpeedKmh: trip.avgSpeedKmh,
+        mode: dom,
+        stopsPerKm: stopsPerKm,
+        tirePsi: store.tirePressurePsi,
+        weather: weather,
+      );
       final ratio = whPerKm / expected;
       range.factors = range.factors.updated(dom, ratio);
       await store.saveFactors(range.factors);
-      scanLog.log('BMS', 'calibration: ${whPerKm.toStringAsFixed(1)}Wh/km vs '
-          'expected ${expected.toStringAsFixed(1)} (${modeName(dom)}, '
-          '${massKg.toStringAsFixed(0)}kg) → factor ${ratio.toStringAsFixed(2)}');
+      scanLog.log(
+          'BMS',
+          'calibration: ${whPerKm.toStringAsFixed(1)}Wh/km vs '
+              'expected ${expected.toStringAsFixed(1)} (${modeName(dom)}, '
+              '${massKg.toStringAsFixed(0)}kg) → factor ${ratio.toStringAsFixed(2)}');
 
       final lastCheck = store.tirePressureCheckedAt;
-      final daysSinceCheck = lastCheck == null
-          ? 999
-          : DateTime.now().difference(lastCheck).inDays;
+      final daysSinceCheck =
+          lastCheck == null ? 999 : DateTime.now().difference(lastCheck).inDays;
 
       lastDiagnostic = range.diagnoseTrip(
         whPerKmMeasured: whPerKm,
@@ -485,7 +501,10 @@ class AppController extends ChangeNotifier {
     final dLat = _rad(lat2 - lat1);
     final dLng = _rad(lng2 - lng1);
     final a = math.sin(dLat / 2) * math.sin(dLat / 2) +
-        math.cos(_rad(lat1)) * math.cos(_rad(lat2)) * math.sin(dLng / 2) * math.sin(dLng / 2);
+        math.cos(_rad(lat1)) *
+            math.cos(_rad(lat2)) *
+            math.sin(dLng / 2) *
+            math.sin(dLng / 2);
     return 2 * r * math.asin(math.sqrt(a));
   }
 

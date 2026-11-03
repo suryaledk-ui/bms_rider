@@ -354,7 +354,8 @@ class _HomePageState extends State<HomePage> {
               value: t.currentA.toStringAsFixed(1),
               unit: 'A',
               icon: Icons.electric_bolt_rounded,
-              color: t.currentA > 0 ? VoltTokens.voltAmber : VoltTokens.voltMint,
+              color:
+                  t.currentA > 0 ? VoltTokens.voltAmber : VoltTokens.voltMint,
               subtitle: t.currentA > 0 ? 'discharging' : 'regen / charging',
             ),
             StatCard(
@@ -526,7 +527,8 @@ class _HomePageState extends State<HomePage> {
                 const SizedBox(height: 2),
                 Text(
                   t == null ? etaLabel : '${t.socPercent}% · $etaLabel',
-                  style: VoltType.caption.copyWith(color: VoltTokens.textSecondary),
+                  style: VoltType.caption
+                      .copyWith(color: VoltTokens.textSecondary),
                 ),
               ],
             ),
@@ -929,6 +931,27 @@ class _HomePageState extends State<HomePage> {
               ),
             ],
           ),
+          if (d.drivetrainSuspect) ...[
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                Icon(
+                  Icons.build_circle,
+                  color: VoltTokens.voltAmber,
+                  size: 18,
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    'Inspect drivetrain',
+                    style: VoltType.bodyStrong.copyWith(
+                      color: VoltTokens.voltAmber,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ],
           if (d.hints.isNotEmpty) ...[
             const SizedBox(height: 10),
             for (final h in d.hints)

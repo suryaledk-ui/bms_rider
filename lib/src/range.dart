@@ -203,7 +203,8 @@ class RangeEstimator {
     return ec + kPaux / math.max(kmh, 5.0);
   }
 
-  double whPerKmForMode(RideMode mode, {WeatherInfo? weather, double? tirePsi}) {
+  double whPerKmForMode(RideMode mode,
+      {WeatherInfo? weather, double? tirePsi}) {
     final v = refSpeed(mode);
     final hw = weather?.headwindKmh(90) ?? 0; // course-agnostic default
     return whPerKmAt(v, mode, tirePsi: tirePsi, headwindKmh: hw);
@@ -233,7 +234,8 @@ class RiderFactors {
     return factors[k] ?? 1.0;
   }
 
-  RiderFactors updated(RideMode m, double measuredVsPredicted, {double alpha = 0.12}) {
+  RiderFactors updated(RideMode m, double measuredVsPredicted,
+      {double alpha = 0.12}) {
     final k = modeName(m);
     final cur = factorFor(m);
     final next = cur + alpha * (measuredVsPredicted - cur);
@@ -285,7 +287,17 @@ class DiagnosticResult {
   final bool lessRange;
   final String title;
   final List<String> hints;
-  const DiagnosticResult({required this.lessRange, required this.title, required this.hints});
+
+  /// True when measured consumption is >1.4× the physics expectation, which
+  /// strongly points at drivetrain resistance (brakes/bearings/wheels).
+  final bool drivetrainSuspect;
+
+  const DiagnosticResult({
+    required this.lessRange,
+    required this.title,
+    required this.hints,
+    this.drivetrainSuspect = false,
+  });
 }
 
 class RangeEngine {
@@ -294,7 +306,8 @@ class RangeEngine {
 
   double usableWh; // measured/estimated usable pack energy
 
-  RangeEngine({required this.estimator, required this.factors, required this.usableWh});
+  RangeEngine(
+      {required this.estimator, required this.factors, required this.usableWh});
 
   RangeReport report(
     Telemetry t,
@@ -310,9 +323,8 @@ class RangeEngine {
     // dead band as unusable: only the SOC range above the cutoff counts.
     final cutoff = cutoffSocPercent.clamp(0, 90).toDouble();
     final span = 100.0 - cutoff;
-    final frac = span <= 0
-        ? 1.0
-        : ((t.socPercent - cutoff) / span).clamp(0.0, 1.0);
+    final frac =
+        span <= 0 ? 1.0 : ((t.socPercent - cutoff) / span).clamp(0.0, 1.0);
     final energyNow = usableWh * frac;
 
     double kmFor(RideMode m) {
@@ -336,8 +348,9 @@ class RangeEngine {
     }
 
     final liveMode = modeForSpeed(currentSpeedKmh);
-    final liveEc = estimator.whPerKmAt(currentSpeedKmh, liveMode, tirePsi: tirePsi) *
-        factors.factorFor(liveMode);
+    final liveEc =
+        estimator.whPerKmAt(currentSpeedKmh, liveMode, tirePsi: tirePsi) *
+            factors.factorFor(liveMode);
     final liveKm = energyNow / liveEc;
 
     return RangeReport(
@@ -360,7 +373,8 @@ class RangeEngine {
     // Voltage sag proxy (only when discharging under load).
     var sag = 0.0;
     if (t.currentA > 5 && t.voltageV > 0) {
-      final estOver = t.nominalAh > 0 ? t.currentA / t.nominalAh : 0.0; // C-rate
+      final estOver =
+          t.nominalAh > 0 ? t.currentA / t.nominalAh : 0.0; // C-rate
       sag = math.min(estOver * 2.5, 6.0);
     }
 
@@ -424,10 +438,27 @@ class RangeEngine {
       '2 · Tyre pressure: check and inflate (low pressure raises rolling loss).',
       '3 · Drivetrain drag: check brake drag, bearings, wheel alignment.',
       '4 · Riding style: hard acceleration and stop-go raises consumption.',
-      if (stopsPerKm > 2.0) '5 · Many stops (${stopsPerKm.toStringAsFixed(1)}/km) — expected for city riding.',
-      if (daysSinceTyreCheck > 30) '6 · Tyre not checked in 30+ days — do it now.',
+      if (stopsPerKm > 2.0)
+        '5 · Many stops (${stopsPerKm.toStringAsFixed(1)}/km) — expected for city riding.',
+      if (daysSinceTyreCheck > 30)
+        '6 · Tyre not checked in 30+ days — do it now.',
       'Battery itself is NOT the primary suspect — SOH is shown separately.',
     ];
+
+    if (ratio > 1.4) {
+      hints.insert(
+        0,
+        'Check brakes, bearings, wheel alignment and tires — consumption is '
+        '>1.4× above expected (>1.4× = likely drivetrain resistance).',
+      );
+      return DiagnosticResult(
+        lessRange: true,
+        title: 'Consumption far above expected',
+        hints: hints,
+        drivetrainSuspect: true,
+      );
+    }
+
     return DiagnosticResult(
       lessRange: true,
       title: 'Less range detected',
