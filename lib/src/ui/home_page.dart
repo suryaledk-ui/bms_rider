@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -20,6 +22,23 @@ class HomePage extends StatefulWidget {
 
 class _HomePageState extends State<HomePage> {
   bool _scanning = false;
+  Timer? _ticker;
+
+  @override
+  void initState() {
+    super.initState();
+    // Drives the "updated Xs ago" freshness micro-text between telemetry
+    // frames / watchdog notifications (both arrive at ~5s granularity).
+    _ticker = Timer.periodic(const Duration(seconds: 5), (_) {
+      if (mounted) setState(() {});
+    });
+  }
+
+  @override
+  void dispose() {
+    _ticker?.cancel();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -62,6 +81,7 @@ class _HomePageState extends State<HomePage> {
               state: bms.state,
               status: bms.status,
               protocol: bms.proto?.name,
+              dataFresh: bms.dataFresh,
               onTap: () => _showScanSheet(context, app),
             ),
             if (bms.state == BmsState.scanning) ..._scanningPanel(),
@@ -223,12 +243,14 @@ class _HomePageState extends State<HomePage> {
   // ---------------------------------------------------------------------
 
   List<Widget> _liveSection(BuildContext context, AppController app) {
-    final t = app.bms.latest!;
+    final bms = app.bms;
+    final t = bms.latest!;
     final speed = app.currentSpeedKmh;
     final mode = modeForSpeed(speed);
     final report = app.range.report(t, speed, 0);
     final socColor = VoltTokens.socColor(t.socPercent);
     final riding = app.ride != null;
+    final dataFresh = bms.dataFresh;
 
     return [
       // ---- Hero SOC block ----
@@ -247,6 +269,13 @@ class _HomePageState extends State<HomePage> {
                     children: [
                       _packTagRow(t: t),
                       const SizedBox(height: 10),
+                      Center(
+                        child: LiveBadge(
+                          fresh: dataFresh,
+                          ageSeconds: bms.dataAgeSeconds,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
                       Center(
                         child: ModeChip(
                           mode: modeName(mode),
@@ -269,10 +298,14 @@ class _HomePageState extends State<HomePage> {
                   ),
                 ),
                 const SizedBox(width: 8),
-                SocRing(
-                  soc: t.socPercent,
-                  size: 152,
-                  sublabel: '${t.voltageV.toStringAsFixed(1)} V',
+                AnimatedOpacity(
+                  opacity: dataFresh ? 1.0 : 0.55,
+                  duration: VoltTokens.medium,
+                  child: SocRing(
+                    soc: t.socPercent,
+                    size: 152,
+                    sublabel: '${t.voltageV.toStringAsFixed(1)} V',
+                  ),
                 ),
               ],
             ),
@@ -287,47 +320,55 @@ class _HomePageState extends State<HomePage> {
         title: 'Electrical readings',
         icon: Icons.bolt_rounded,
       ),
-      GridView.count(
-        crossAxisCount: 2,
-        shrinkWrap: true,
-        physics: const NeverScrollableScrollPhysics(),
-        childAspectRatio: 1.6,
-        children: [
-          StatCard(
-            label: 'Voltage',
-            value: t.voltageV.toStringAsFixed(1),
-            unit: 'V',
-            icon: Icons.bolt_rounded,
-            color: VoltTokens.voltCyan,
-          ),
-          StatCard(
-            label: 'Current',
-            value: t.currentA.toStringAsFixed(1),
-            unit: 'A',
-            icon: Icons.electric_bolt_rounded,
-            color: t.currentA > 0 ? VoltTokens.voltAmber : VoltTokens.voltMint,
-            subtitle: t.currentA > 0 ? 'discharging' : 'regen / charging',
-          ),
-          StatCard(
-            label: 'Power',
-            value: t.powerW.abs().toStringAsFixed(0),
-            unit: 'W',
-            icon: Icons.flash_on_rounded,
-            color: t.powerW > 0 ? VoltTokens.voltAmber : VoltTokens.voltMint,
-          ),
-          StatCard(
-            label: 'Cells',
-            value: t.cellVolts.isEmpty
-                ? '—'
-                : '${t.cellMinV.toStringAsFixed(2)}–${t.cellMaxV.toStringAsFixed(2)}',
-            unit: 'V',
-            icon: Icons.grid_view_rounded,
-            color: VoltTokens.voltMint,
-            subtitle:
-                t.cellVolts.isEmpty ? null : '${t.cellVolts.length} series',
-          ),
-        ],
+      AnimatedOpacity(
+        opacity: dataFresh ? 1.0 : 0.55,
+        duration: VoltTokens.medium,
+        child: GridView.count(
+          crossAxisCount: 2,
+          shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
+          childAspectRatio: 1.6,
+          children: [
+            StatCard(
+              label: 'Voltage',
+              value: t.voltageV.toStringAsFixed(1),
+              unit: 'V',
+              icon: Icons.bolt_rounded,
+              color: VoltTokens.voltCyan,
+            ),
+            StatCard(
+              label: 'Current',
+              value: t.currentA.toStringAsFixed(1),
+              unit: 'A',
+              icon: Icons.electric_bolt_rounded,
+              color: t.currentA > 0 ? VoltTokens.voltAmber : VoltTokens.voltMint,
+              subtitle: t.currentA > 0 ? 'discharging' : 'regen / charging',
+            ),
+            StatCard(
+              label: 'Power',
+              value: t.powerW.abs().toStringAsFixed(0),
+              unit: 'W',
+              icon: Icons.flash_on_rounded,
+              color: t.powerW > 0 ? VoltTokens.voltAmber : VoltTokens.voltMint,
+            ),
+            StatCard(
+              label: 'Cells',
+              value: t.cellVolts.isEmpty
+                  ? '—'
+                  : '${t.cellMinV.toStringAsFixed(2)}–${t.cellMaxV.toStringAsFixed(2)}',
+              unit: 'V',
+              icon: Icons.grid_view_rounded,
+              color: VoltTokens.voltMint,
+              subtitle:
+                  t.cellVolts.isEmpty ? null : '${t.cellVolts.length} series',
+            ),
+          ],
+        ),
       ),
+      const SizedBox(height: 10),
+
+      // ---- Live overview strip ----
+      _liveOverviewCard(t),
       const SizedBox(height: 10),
 
       // ---- Range forecast ----
@@ -409,6 +450,185 @@ class _HomePageState extends State<HomePage> {
         _diagnosticCard(context, app.lastDiagnostic!),
       ],
     ];
+  }
+
+  // ---------------------------------------------------------------------
+  // Live overview strip
+  // ---------------------------------------------------------------------
+
+  Widget _liveOverviewCard(Telemetry t) {
+    final currentColor =
+        t.currentA > 0 ? VoltTokens.voltAmber : VoltTokens.voltMint;
+    final powerColor =
+        t.powerW > 0 ? VoltTokens.voltAmber : VoltTokens.voltMint;
+    final tempsLabel = t.tempsC.isEmpty
+        ? '—'
+        : t.tempsC.map((c) => c.toStringAsFixed(1)).join(' / ');
+
+    return VoltCard(
+      margin: const EdgeInsets.fromLTRB(16, 6, 16, 6),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(
+                Icons.insights_rounded,
+                size: 16,
+                color: VoltTokens.voltMint,
+              ),
+              const SizedBox(width: 8),
+              Text(
+                'LIVE OVERVIEW',
+                style: VoltType.labelMicro.copyWith(
+                  color: VoltTokens.voltMint,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                child: _liveMetric(
+                  label: 'Pack voltage',
+                  value: t.voltageV.toStringAsFixed(1),
+                  unit: 'V',
+                  color: VoltTokens.voltMint,
+                  now: true,
+                ),
+              ),
+              Expanded(
+                child: _liveMetric(
+                  label: 'Current',
+                  value: t.currentA.toStringAsFixed(1),
+                  unit: 'A',
+                  color: currentColor,
+                ),
+              ),
+              Expanded(
+                child: _liveMetric(
+                  label: 'Power',
+                  value: t.powerW.abs().toStringAsFixed(0),
+                  unit: 'W',
+                  color: powerColor,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 14),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                child: _liveMetric(
+                  label: t.cellVolts.isEmpty
+                      ? 'Cells'
+                      : 'Cells · ${t.cellVolts.length}S',
+                  value: t.cellVolts.isEmpty
+                      ? '—'
+                      : '${t.cellMinV.toStringAsFixed(2)}–${t.cellMaxV.toStringAsFixed(2)}',
+                  unit: t.cellVolts.isEmpty ? null : 'V',
+                  color: VoltTokens.voltMint,
+                ),
+              ),
+              Expanded(
+                child: _liveMetric(
+                  label: 'Pack temp',
+                  value: tempsLabel,
+                  unit: t.tempsC.isEmpty ? null : '°C',
+                  color: VoltTokens.voltCyan,
+                ),
+              ),
+              Expanded(
+                child: _liveMetric(
+                  label: 'Residual',
+                  value: t.residualAh.toStringAsFixed(2),
+                  unit: 'Ah',
+                  color: VoltTokens.textPrimary,
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _liveMetric({
+    required String label,
+    required String value,
+    String? unit,
+    Color? color,
+    bool now = false,
+  }) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            if (now) ...[
+              Container(
+                width: 6,
+                height: 6,
+                decoration: BoxDecoration(
+                  color: VoltTokens.voltMint,
+                  shape: BoxShape.circle,
+                  boxShadow: [
+                    BoxShadow(
+                      color: VoltTokens.voltMint.withValues(alpha: 0.6),
+                      blurRadius: 5,
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 5),
+            ],
+            Flexible(
+              child: Text(
+                label.toUpperCase(),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: VoltType.labelMicro.copyWith(
+                  fontSize: 9.5,
+                  color: VoltTokens.textMuted,
+                ),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 4),
+        FittedBox(
+          fit: BoxFit.scaleDown,
+          alignment: Alignment.centerLeft,
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.baseline,
+            textBaseline: TextBaseline.alphabetic,
+            children: [
+              Text(
+                value,
+                style: VoltType.metricValue.copyWith(
+                  fontSize: 18,
+                  color: color ?? VoltTokens.textPrimary,
+                ),
+              ),
+              if (unit != null && unit.isNotEmpty) ...[
+                const SizedBox(width: 3),
+                Text(
+                  unit,
+                  style: VoltType.caption.copyWith(
+                    color: VoltTokens.textMuted,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ),
+      ],
+    );
   }
 
   Widget _packTagRow({required Telemetry t}) {

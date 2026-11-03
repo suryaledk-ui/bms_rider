@@ -587,11 +587,76 @@ class ModeChip extends StatelessWidget {
   }
 }
 
+/// Compact freshness indicator: green LIVE dot when telemetry is fresh,
+/// amber STALE with age when data has stopped, dim when nothing arrived yet.
+class LiveBadge extends StatelessWidget {
+  final bool fresh;
+  final int ageSeconds;
+  final bool hasData;
+
+  const LiveBadge({
+    super.key,
+    required this.fresh,
+    required this.ageSeconds,
+    this.hasData = true,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final (Color color, String label) = !hasData
+        ? (VoltTokens.textMuted, 'NO DATA')
+        : fresh
+            ? (VoltTokens.voltMint, 'LIVE')
+            : (VoltTokens.voltAmber, 'NOT LIVE');
+
+    final ageText = !hasData
+        ? 'waiting for first frame'
+        : fresh
+            ? 'updated now'
+            : 'last data ${ageSeconds < 0 ? '—' : '${ageSeconds}s ago'}';
+
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(
+          width: 8,
+          height: 8,
+          decoration: BoxDecoration(
+            color: color,
+            shape: BoxShape.circle,
+            boxShadow: [
+              BoxShadow(color: color.withValues(alpha: 0.7), blurRadius: 6),
+            ],
+          ),
+        ),
+        const SizedBox(width: 6),
+        Text(
+          label,
+          style: VoltType.labelMicro.copyWith(
+            color: color,
+            fontSize: 10.5,
+            letterSpacing: 1.2,
+          ),
+        ),
+        const SizedBox(width: 8),
+        Text(
+          ageText,
+          style: VoltType.caption.copyWith(
+            color: VoltTokens.textMuted,
+            fontSize: 11,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
 class ConnectionBanner extends StatelessWidget {
   final BmsState state;
   final String status;
   final String? protocol;
   final VoidCallback onTap;
+  final bool? dataFresh;
 
   const ConnectionBanner({
     super.key,
@@ -599,11 +664,17 @@ class ConnectionBanner extends StatelessWidget {
     required this.status,
     required this.protocol,
     required this.onTap,
+    this.dataFresh,
   });
 
   @override
   Widget build(BuildContext context) {
     final (Color accent, IconData icon, String badge) = switch (state) {
+      BmsState.connected when dataFresh == false => (
+          VoltTokens.voltAmber,
+          Icons.sync_problem_rounded,
+          'NOT LIVE'
+        ),
       BmsState.connected => (
           VoltTokens.voltMint,
           Icons.bluetooth_connected,

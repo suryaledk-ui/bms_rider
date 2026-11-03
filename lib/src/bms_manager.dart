@@ -447,6 +447,11 @@ class BmsManager extends ChangeNotifier {
       latest = t;
       _lastDataAt = DateTime.now();
       _dataTimedOut = false;
+      // Restore the normal status once fresh data flows again; the liveness
+      // watchdog may have replaced it with a "data stale" message.
+      if (state == BmsState.connected && proto != null) {
+        status = 'Connected · ${proto!.name}';
+      }
       _telemetry.add(t);
       notifyListeners();
     };
@@ -505,6 +510,19 @@ class BmsManager extends ChangeNotifier {
   bool _dataTimedOut = false;
   Timer? _livenessTimer;
 
+  /// Seconds since the last telemetry frame arrived. -1 when no data has
+  /// ever been received for the current session.
+  int get dataAgeSeconds {
+    final t = _lastDataAt;
+    if (t == null) return -1;
+    return DateTime.now().difference(t).inSeconds;
+  }
+
+  /// True while telemetry is live: data has arrived and is at most 8s old.
+  bool get dataFresh => dataAgeSeconds >= 0 && dataAgeSeconds <= 8;
+
+  DateTime? get lastDataAt => _lastDataAt;
+
   void _checkLiveness() {
     if (state != BmsState.connected) return;
     final t = _lastDataAt;
@@ -519,8 +537,8 @@ class BmsManager extends ChangeNotifier {
         _intentionalStop = false;
         _device?.disconnect(); // state listener schedules reconnect
       }
-    } else if (age > 12) {
-      status = 'Connected · waiting for data…';
+    } else if (age > 8) {
+      status = 'Not receiving data — move closer to scooter';
       notifyListeners();
     }
   }
