@@ -64,6 +64,11 @@ class AppStore {
   double get usableWh => prefs?.getDouble('usable_wh') ?? 960.0; // 48V20Ah default
   Future<void> setUsableWh(double v) async => prefs?.setDouble('usable_wh', v);
 
+  /// True once the user (or a preset) set usableWh manually — BMS-derived
+  /// auto-detection is then disabled.
+  bool get usableWhManual => prefs?.getBool('usable_wh_manual') ?? false;
+  Future<void> setUsableWhManual(bool v) async => prefs?.setBool('usable_wh_manual', v);
+
   String get vehiclePresetId => prefs?.getString('vehicle_preset_id') ?? 'generic_48v20ah';
   Future<void> setVehiclePresetId(String v) async => prefs?.setString('vehicle_preset_id', v);
 

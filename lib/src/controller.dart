@@ -67,6 +67,7 @@ class AppController extends ChangeNotifier {
     await store.init();
     await scanLog.init();
     bms.attachLogger(scanLog);
+    bms.telemetry.listen(_onTelemetry);
     final mass = store.scooterWeightKg + store.riderWeightKg;
     range = RangeEngine(
       estimator: RangeEstimator(massKg: mass),
@@ -93,6 +94,30 @@ class AppController extends ChangeNotifier {
   Future<void> refreshHistory() async {
     history = await store.rides();
     notifyListeners();
+  }
+
+  bool _autoWhDone = false;
+
+  /// BMS reports nominal Ah + cell count — derive usable Wh automatically
+  /// (unless the user set it manually): nominal Ah × cells × 3.70 V × 0.92.
+  void _onTelemetry(Telemetry t) {
+    if (_autoWhDone || store.usableWhManual) return;
+    if (t.nominalAh > 0 && t.cellVolts.length >= 4) {
+      final derivedWh = t.nominalAh * t.cellVolts.length * 3.70 * 0.92;
+      if (derivedWh > 200 && derivedWh < 6000) {
+        _autoWhDone = true;
+        store.setUsableWh(derivedWh);
+        final mass = store.scooterWeightKg + store.riderWeightKg;
+        range = RangeEngine(
+          estimator: RangeEstimator(massKg: mass),
+          factors: store.factors,
+          usableWh: derivedWh,
+        );
+        scanLog.log('BMS', 'auto-derived usableWh=${derivedWh.toStringAsFixed(0)} '
+            '(nom ${t.nominalAh.toStringAsFixed(2)}Ah × ${t.cellVolts.length} cells)');
+        notifyListeners();
+      }
+    }
   }
 
   /// Apply rider/scooter/tyre/capacity profile changes live.
