@@ -52,7 +52,7 @@ class _RidePageState extends State<RidePage> {
       );
     }
 
-    final speed = app.currentSpeedKmh;
+    final speed = app.smoothedSpeedKmh;
     final mode = modeForSpeed(speed);
     final distKm = ride.distanceM / 1000.0;
     final ec = distKm > 0.03 ? ride.whUsed / distKm : 0.0;

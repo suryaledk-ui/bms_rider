@@ -245,7 +245,7 @@ class _HomePageState extends State<HomePage> {
   List<Widget> _liveSection(BuildContext context, AppController app) {
     final bms = app.bms;
     final t = bms.latest!;
-    final speed = app.currentSpeedKmh;
+    final speed = app.smoothedSpeedKmh;
     final mode = modeForSpeed(speed);
     final socColor = VoltTokens.socColor(t.socPercent);
     final riding = app.ride != null;
