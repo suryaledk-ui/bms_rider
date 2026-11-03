@@ -156,7 +156,12 @@ class AppController extends ChangeNotifier {
     }
 
     // Charging lifecycle + notifications.
-    final charging = t.charging || t.currentA < -0.2;
+    //
+    // On several JBD clones the charging flag bit is unreliable and the
+    // current sign is inverted while discharging. Use current MAGNITUDE as
+    // the primary signal: strong inflow (>1A) means charging; medium inflow
+    // only counts as charging when the flag also agrees.
+    final charging = t.currentA < -1.0 || (t.charging && t.currentA < -0.3);
     if (charging) {
       if (!_wasCharging) {
         _wasCharging = true;
@@ -183,8 +188,15 @@ class AppController extends ChangeNotifier {
     // Coulomb-count auto capacity: track WH drawn while discharging and the
     // SOC delta across that window; when ΔSOC ≥ 10% we can estimate usable
     // capacity = energyUsed / (ΔSOC/100).
-    if (t.currentA > 0.2) {
-      _dischargeEnergyWs = (_dischargeEnergyWs ?? 0) + (t.powerW * 2.0);
+    //
+    // Sign normalization: power > 0 = discharge on standard boards; on the
+    // inverted-sign clones the same physical discharge shows as power < 0
+    // while NOT charging — treat that magnitude as discharge too.
+    final dischargeW = t.powerW > 0
+        ? t.powerW
+        : (!charging && t.currentA < -0.2 ? -t.powerW : 0.0);
+    if (dischargeW > 0.5) {
+      _dischargeEnergyWs = (_dischargeEnergyWs ?? 0) + (dischargeW * 2.0);
       _socAnchor ??= t.socPercent.toDouble();
       final delta = _socAnchor! - t.socPercent;
       final used = (_dischargeEnergyWs! / 3600.0);
@@ -324,10 +336,18 @@ class AppController extends ChangeNotifier {
     final dt = now.difference(r.lastTick).inSeconds.toDouble();
     r.lastTick = now;
 
-    // Energy integration: Wh = W * hours
+    // Energy integration: Wh = W * hours.
+    //
+    // Sign normalization: on inverted-sign JBD clones, physical discharge
+    // shows as negative current. Distinguish by charging state — when not
+    // charging, negative power magnitude is discharge, not regen.
     final dtH = dt / 3600.0;
-    if (t.powerW > 0) {
-      r.whUsed += t.powerW * dtH;
+    final charging = t.currentA < -1.0 || (t.charging && t.currentA < -0.3);
+    final dischargeW = t.powerW > 0
+        ? t.powerW
+        : (!charging && t.currentA < -0.2 ? -t.powerW : 0.0);
+    if (dischargeW > 0.5) {
+      r.whUsed += dischargeW * dtH;
     } else {
       r.whRegen += -t.powerW * dtH;
     }
@@ -353,7 +373,24 @@ class AppController extends ChangeNotifier {
 
     final durationS = DateTime.now().difference(r.start).inSeconds.toDouble();
     final distKm = r.distanceM / 1000.0;
-    final whPerKm = distKm > 0.05 ? r.whUsed / distKm : 0.0;
+
+    // Energy accounting.
+    //
+    // Some JBD clones report discharge current with INVERTED sign (we saw
+    // wh_used stay 0.0 while wh_regen grew on every ride, even though SOC
+    // was falling). Guard: if the raw watt-integral is implausibly low but
+    // the SOC dropped by >= 1%, fall back to a SOC-based energy estimate.
+    var whUsed = r.whUsed;
+    final socDelta = (r.socStart - r.socEnd).toDouble();
+    if (whUsed < 2.0 && socDelta >= 1.0) {
+      final socBased = store.usableWh * (socDelta / 100.0);
+      if (socBased > whUsed) {
+        scanLog.log('BMS', 'current sign fallback: raw ${whUsed.toStringAsFixed(1)}Wh '
+            '→ SOC-based ${socBased.toStringAsFixed(1)}Wh (ΔSOC $socDelta%)');
+        whUsed = socBased;
+      }
+    }
+    final whPerKm = distKm > 0.05 ? whUsed / distKm : 0.0;
 
     // Dominant mode by seconds
     RideMode dom = RideMode.eco;
@@ -370,7 +407,7 @@ class AppController extends ChangeNotifier {
       end: DateTime.now(),
       distanceM: r.distanceM,
       durationS: durationS,
-      whUsed: r.whUsed,
+      whUsed: whUsed,
       whRegen: r.whRegen,
       whPerKm: whPerKm,
       avgSpeedKmh: distKm > 0 ? distKm / (durationS / 3600.0) : 0,
@@ -380,12 +417,21 @@ class AppController extends ChangeNotifier {
       protocol: bms.proto?.name ?? '?',
       stops: r.stops,
       modeSeconds: r.modeSeconds.map((k, v) => MapEntry(modeName(k), v)),
+      // Snapshot the weight used for THIS ride so future calibrations stay
+      // correct even if the user later changes the profile.
+      riderKg: store.riderWeightKg,
+      scooterKg: store.scooterWeightKg,
     );
 
     if (distKm > 0.05 && whPerKm > 0) {
-      // update rider factor
+      // update rider factor, using the trip's own weight snapshot
       final stopsPerKm = distKm > 0 ? r.stops / distKm : 0.0;
-      final expected = range.estimator.whPerKmTrip(
+      final massKg =
+          (trip.riderKg + trip.scooterKg) > 0
+              ? trip.riderKg + trip.scooterKg
+              : store.scooterWeightKg + store.riderWeightKg;
+      final estimator = RangeEstimator(massKg: massKg);
+      final expected = estimator.whPerKmTrip(
             avgSpeedKmh: trip.avgSpeedKmh,
             mode: dom,
             stopsPerKm: stopsPerKm,
@@ -395,6 +441,9 @@ class AppController extends ChangeNotifier {
       final ratio = whPerKm / expected;
       range.factors = range.factors.updated(dom, ratio);
       await store.saveFactors(range.factors);
+      scanLog.log('BMS', 'calibration: ${whPerKm.toStringAsFixed(1)}Wh/km vs '
+          'expected ${expected.toStringAsFixed(1)} (${modeName(dom)}, '
+          '${massKg.toStringAsFixed(0)}kg) → factor ${ratio.toStringAsFixed(2)}');
 
       final lastCheck = store.tirePressureCheckedAt;
       final daysSinceCheck = lastCheck == null

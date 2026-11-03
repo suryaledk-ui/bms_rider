@@ -247,10 +247,15 @@ class _HomePageState extends State<HomePage> {
     final t = bms.latest!;
     final speed = app.currentSpeedKmh;
     final mode = modeForSpeed(speed);
-    final report = app.range.report(t, speed, 0);
     final socColor = VoltTokens.socColor(t.socPercent);
     final riding = app.ride != null;
     final dataFresh = bms.dataFresh;
+    final report = app.range.report(
+      t,
+      speed,
+      0,
+      cutoffSocPercent: app.store.cutoffSocPercent,
+    );
 
     return [
       // ---- Hero SOC block ----
@@ -801,7 +806,8 @@ class _HomePageState extends State<HomePage> {
           for (final r in rows) _rangeRow(r, maxKm),
           const SizedBox(height: 4),
           Text(
-            'Estimate from pack energy + your riding style — refines automatically as you ride.',
+            'Estimate from pack energy + your riding style — refines automatically as you ride. '
+            'Excludes energy below your scooter\'s cutoff SOC.',
             style: VoltType.caption.copyWith(
               fontSize: 11,
               color: VoltTokens.textSecondary,

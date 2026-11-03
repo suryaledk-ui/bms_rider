@@ -292,9 +292,17 @@ class RangeEngine {
     double stopsPerKm, {
     WeatherInfo? weather,
     double? tirePsi,
+    int cutoffSocPercent = 0,
   }) {
-    final soc = (t.socPercent.clamp(0, 100)) / 100.0;
-    final energyNow = usableWh * soc;
+    // A scooter controller often cuts off before the BMS reports 0%
+    // (e.g. stops at 52–54 V while BMS still shows 15–25%). Treat that
+    // dead band as unusable: only the SOC range above the cutoff counts.
+    final cutoff = cutoffSocPercent.clamp(0, 90).toDouble();
+    final span = 100.0 - cutoff;
+    final frac = span <= 0
+        ? 1.0
+        : ((t.socPercent - cutoff) / span).clamp(0.0, 1.0);
+    final energyNow = usableWh * frac;
 
     double kmFor(RideMode m) {
       final factor = factors.factorFor(m);

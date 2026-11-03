@@ -21,6 +21,7 @@ class _ProfilePageState extends State<ProfilePage> {
   late TextEditingController _scooter;
   late TextEditingController _tyre;
   late TextEditingController _wh;
+  late TextEditingController _cutoff;
   String _presetId = 'generic_48v20ah';
   String? _savedMsg;
   bool _savedOk = false;
@@ -37,6 +38,8 @@ class _ProfilePageState extends State<ProfilePage> {
     _tyre = TextEditingController(
         text: app.store.tirePressurePsi.toStringAsFixed(0));
     _wh = TextEditingController(text: app.store.usableWh.toStringAsFixed(0));
+    _cutoff = TextEditingController(
+        text: app.store.cutoffSocPercent.toString());
   }
 
   @override
@@ -45,6 +48,7 @@ class _ProfilePageState extends State<ProfilePage> {
     _scooter.dispose();
     _tyre.dispose();
     _wh.dispose();
+    _cutoff.dispose();
     super.dispose();
   }
 
@@ -57,6 +61,7 @@ class _ProfilePageState extends State<ProfilePage> {
     final scooter = parse(_scooter);
     final tyre = parse(_tyre);
     final wh = parse(_wh);
+    final cutoff = int.tryParse(_cutoff.text) ?? 15;
 
     if (rider == null || scooter == null || tyre == null || wh == null) {
       setState(() {
@@ -93,6 +98,7 @@ class _ProfilePageState extends State<ProfilePage> {
       tirePressurePsi: tyre,
       usableWh: wh,
     );
+    await app.store.setCutoffSocPercent(cutoff);
     if (!mounted) return;
     setState(() {
       _savedMsg = 'Saved — range estimates updated.';
@@ -247,10 +253,24 @@ class _ProfilePageState extends State<ProfilePage> {
             title: 'Battery capacity',
             subtitle: 'Nominal pack energy (Wh). Default 960 = 48V 20Ah. '
                 'Set from your pack label, or calibrate on the Battery screen.',
-            child: _WeightField(
-              controller: _wh,
-              label: 'Usable energy (Wh)',
-              icon: Icons.electric_bolt_rounded,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _WeightField(
+                  controller: _wh,
+                  label: 'Usable energy (Wh)',
+                  icon: Icons.electric_bolt_rounded,
+                ),
+                const SizedBox(height: 12),
+                _WeightField(
+                  controller: _cutoff,
+                  label: 'Scooter cutoff SOC (%)',
+                  icon: Icons.battery_alert_rounded,
+                  helper: 'How much SOC is left when your scooter stops '
+                      '(e.g. 15 = stops at ~15% shown). Energy below this '
+                      'is excluded from range estimates.',
+                ),
+              ],
             ),
           ),
 
@@ -381,24 +401,38 @@ class _WeightField extends StatelessWidget {
   final TextEditingController controller;
   final String label;
   final IconData icon;
+  final String? helper;
 
   const _WeightField({
     required this.controller,
     required this.label,
     required this.icon,
+    this.helper,
   });
 
   @override
   Widget build(BuildContext context) {
-    return TextField(
-      controller: controller,
-      keyboardType: TextInputType.number,
-      inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-      style: VoltType.bodyStrong,
-      decoration: InputDecoration(
-        labelText: label,
-        prefixIcon: Icon(icon, size: 18, color: VoltTokens.textMuted),
-      ),
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        TextField(
+          controller: controller,
+          keyboardType: TextInputType.number,
+          inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+          style: VoltType.bodyStrong,
+          decoration: InputDecoration(
+            labelText: label,
+            prefixIcon: Icon(icon, size: 18, color: VoltTokens.textMuted),
+          ),
+        ),
+        if (helper != null) ...[
+          const SizedBox(height: 6),
+          Text(
+            helper!,
+            style: VoltType.caption.copyWith(color: VoltTokens.textMuted),
+          ),
+        ],
+      ],
     );
   }
 }

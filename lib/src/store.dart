@@ -15,7 +15,7 @@ class AppStore {
     prefs = await SharedPreferences.getInstance();
     _db = await openDatabase(
       p.join(await getDatabasesPath(), 'bms_rider.db'),
-      version: 1,
+      version: 2,
       onCreate: (db, _) async {
         await db.execute('''
           CREATE TABLE rides(
@@ -33,9 +33,21 @@ class AppStore {
             soc_end INTEGER NOT NULL,
             protocol TEXT NOT NULL,
             stops INTEGER NOT NULL DEFAULT 0,
-            mode_seconds TEXT NOT NULL DEFAULT '{}'
+            mode_seconds TEXT NOT NULL DEFAULT '{}',
+            rider_kg REAL NOT NULL DEFAULT 0,
+            scooter_kg REAL NOT NULL DEFAULT 0
           )
         ''');
+      },
+      onUpgrade: (db, oldVersion, newVersion) async {
+        if (oldVersion < 2) {
+          await db.execute(
+            'ALTER TABLE rides ADD COLUMN rider_kg REAL NOT NULL DEFAULT 0',
+          );
+          await db.execute(
+            'ALTER TABLE rides ADD COLUMN scooter_kg REAL NOT NULL DEFAULT 0',
+          );
+        }
       },
     );
   }
@@ -63,6 +75,13 @@ class AppStore {
 
   double get usableWh => prefs?.getDouble('usable_wh') ?? 960.0; // 48V20Ah default
   Future<void> setUsableWh(double v) async => prefs?.setDouble('usable_wh', v);
+
+  /// SOC (%) at which the scooter's controller cuts off even though the BMS
+  /// still reports charge (dead band). Range estimates ignore energy below
+  /// this point. Typical for 16S packs that stop at ~52–54 V: 15–25%.
+  int get cutoffSocPercent => prefs?.getInt('cutoff_soc_percent') ?? 15;
+  Future<void> setCutoffSocPercent(int v) async =>
+      prefs?.setInt('cutoff_soc_percent', v.clamp(0, 90));
 
   /// True once the user (or a preset) set usableWh manually — BMS-derived
   /// auto-detection is then disabled.
@@ -108,6 +127,8 @@ class AppStore {
       'protocol': t.protocol,
       'stops': t.stops,
       'mode_seconds': jsonEncode(t.modeSeconds),
+      'rider_kg': t.riderKg,
+      'scooter_kg': t.scooterKg,
     });
   }
 
@@ -134,6 +155,8 @@ class AppStore {
         protocol: r['protocol'] as String,
         stops: r['stops'] as int,
         modeSeconds: modes,
+        riderKg: (r['rider_kg'] as num?)?.toDouble() ?? 0,
+        scooterKg: (r['scooter_kg'] as num?)?.toDouble() ?? 0,
       );
     }).toList();
   }

@@ -57,6 +57,8 @@ class Trip {
   final String protocol;
   final int stops;
   final Map<String, dynamic> modeSeconds; // seconds spent in each mode
+  final double riderKg;
+  final double scooterKg;
 
   const Trip({
     this.id = 0,
@@ -74,6 +76,8 @@ class Trip {
     required this.protocol,
     required this.stops,
     required this.modeSeconds,
+    this.riderKg = 0,
+    this.scooterKg = 0,
   });
 
   double get distanceKm => distanceM / 1000.0;

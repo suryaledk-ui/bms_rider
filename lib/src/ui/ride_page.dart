@@ -56,8 +56,11 @@ class _RidePageState extends State<RidePage> {
     final mode = modeForSpeed(speed);
     final distKm = ride.distanceM / 1000.0;
     final ec = distKm > 0.03 ? ride.whUsed / distKm : 0.0;
-    final liveKm =
-        t != null ? app.range.report(t, speed, 0).liveKm : double.nan;
+    final liveKm = t != null
+        ? app.range
+            .report(t, speed, 0, cutoffSocPercent: app.store.cutoffSocPercent)
+            .liveKm
+        : double.nan;
 
     return PopScope(
       canPop: false,
